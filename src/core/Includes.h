@@ -8,11 +8,19 @@
 #include <unordered_map>
 #include <numeric>
 #include <type_traits>
-
+#include <cstring>
+#include <memory>
 #include "tinyformat.h"
 
-namespace HDRI
+#define FLAIR_ENABLE_MULTITHREADING
+
+#ifdef __EMSCRIPTEN__
+#undef FLAIR_ENABLE_MULTITHREADING
+#endif
+
+namespace Flair
 {
+
 #define Assert(condition) \
         if(!(condition)) {  \
             throw std::runtime_error(tfm::format("%s in %s (%d)", #condition, __FILE__, __LINE__)); \

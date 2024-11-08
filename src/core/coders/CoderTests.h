@@ -5,7 +5,7 @@
 
 #include <random>
 
-namespace HDRI
+namespace Flair
 {
     template<typename T>
     int CompareEncodeDecode(const std::vector<T>& strA, const std::vector<T>& strB, bool translate = false)

@@ -9,7 +9,7 @@ class CDF53 : public Wavelet1D<CDF53<Real>, Real, -2, 3>
 public:
 	CDF53() = delete;
 
-	using kType = typename Real;
+	using kType = Real;
 	static constexpr int kSize = 6;
 
 	inline static const std::array<kType, kSize>& ForwardFather()

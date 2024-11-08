@@ -3,7 +3,7 @@
 #include "CoderUtils.h" 
 #include "Viewer/math/MathUtils.h"
 
-namespace HDRI
+namespace Flair
 {
 
     template<typename InputType, typename OutputType = uint8_t>
@@ -133,7 +133,7 @@ namespace HDRI
 
             if (debug)
             {
-                std::printf("sumMass: %i\n", sumMass);
+                std::printf("sumMass: %i\n", int(sumMass));
                 std::printf("sumNormMass: %i\n", sumNormMass);
                 std::printf("sumNormMassGtMin: %i\n", sumNormMassGtMin);
             }
@@ -175,7 +175,7 @@ namespace HDRI
                 {
                     //PrintModel();
 
-                    std::printf("sumMass: %i\n", sumMass);
+                    std::printf("sumMass: %i\n", int(sumMass));
                     std::printf("kModelMass: %i\n", kModelMass);
                     std::printf("sumNormMass: %i\n", sumNormMass);
                     std::printf("sumNormMassGtMin: %i\n", sumNormMassGtMin);
@@ -232,7 +232,7 @@ namespace HDRI
                 }
             }
 
-            if (debug) std::printf("Building model on %i elements...\n", input.size());
+            if (debug) std::printf("Building model on %zi elements...\n", input.size());
 
             Build(frequencyMap, debug);
         }
@@ -247,18 +247,14 @@ namespace HDRI
         }
 
         std::vector<OutputType> Encode(const std::vector<InputType>& input, const bool isDebug = false, const int monitor0 = 0, const int monitor1 = std::numeric_limits<int>::max())
-        {
-            
+        {  
             auto debug = [&](const int x)
             {
                 return isDebug && x >= monitor0 && x <= monitor1;
             };
 
             // Model not defined
-            AssertMsg(m_model.size() >= 2, "Model is not defined.");
-
-            // If the model only has one element then all the characters of the string are the same
-            if (m_model.size() == 2) { return std::vector<OutputType>({ 1ul << (sizeof(OutputType) * 8 - 1) }); }
+            AssertMsg(m_model.size() >= 2, "Model is not defined.");            
 
             std::vector<OutputType> encoded;
             int bitIdx = -1;
@@ -271,6 +267,13 @@ namespace HDRI
             Assert(!encoded.empty() && input.size() < std::numeric_limits<uint32_t>::max()); // Sanity check
             const uint32_t inputSize = input.size();
             memcpy(encoded.data(), &inputSize, sizeof(uint32_t));
+
+            // If the model only has one element then all the characters of the string are the same
+            if (m_model.size() == 2) 
+            { 
+                encoded.push_back(1ul << (sizeof(OutputType) * 8 - 1));
+                return encoded;
+            }
 
             for (int msgIdx = 0; msgIdx < input.size(); msgIdx++)
             {
@@ -437,7 +440,7 @@ namespace HDRI
 
             elementIdx += 4 / sizeof(OutputType) - 1;
 
-            if (isDebug) std::printf("\n\033[33mDecode %i bytes: %s...\033[39m\n", encoded.size() * 4, packed_bstr(encoded).c_str());
+            if (isDebug) std::printf("\n\033[33mDecode %zi bytes: %s...\033[39m\n", encoded.size() * 4, packed_bstr(encoded).c_str());
 
             for (int msgIdx = 0; msgIdx < length; msgIdx++)
             {
@@ -445,7 +448,7 @@ namespace HDRI
                 {
                     std::printf("\nIteration %i:\n", msgIdx);
                     std::printf("Register: %s\n", bstr(f).c_str());
-                    std::printf("Idx:   %i -> %i\n", elementIdx, encoded.size() - 1);
+                    std::printf("Idx:   %i -> %zi\n", elementIdx, encoded.size() - 1);
                 }
 
                 const uint32_t di = i1 - i0;
@@ -584,6 +587,7 @@ namespace HDRI
                 }
             }
 
+            AssertFmt(decoded.size() == length, "Error: length of decoded data does not match header. Was %zi, should be %i", decoded.size(), length);
             return decoded;
         }
 
@@ -604,10 +608,12 @@ namespace HDRI
 
         inline uint32_t UnpackBit(const std::vector<OutputType>& encoded, uint32_t& elementIdx, int& bitIdx)
         {
+            bool incd = false;
             if (bitIdx < 0)
             {
-                if (elementIdx == encoded.size() - 1) { return 0; }
+                if (elementIdx >= encoded.size() - 1) { return 0; }
                 elementIdx++;
+                incd = true;
                 bitIdx = sizeof(OutputType) * 8 - 1;
             }
 

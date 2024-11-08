@@ -9,7 +9,7 @@ class Haar : public Wavelet1D<Haar<Real>, Real, 0, 1>
 public:
 	Haar() = delete;
 
-	using kType = typename Real;
+	using kType = Real;
 	static constexpr int kSize = 2;
 
 	inline static const std::array<kType, kSize>& ForwardFather()

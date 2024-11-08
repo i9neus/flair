@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "../Includes.h"
+#include "../../Includes.h"
 
 template<typename Wavelet, typename Real, int K0, int K1>
 class Wavelet1D
@@ -56,8 +56,8 @@ public:
 
 		AssertMsg((size & (size - 1)) == 0, "Not a power of 2.");
 
-		const auto& father = typename Wavelet::ForwardFather();
-		const auto& mother = typename Wavelet::ForwardMother();
+		const auto& father = Wavelet::ForwardFather();
+		const auto& mother = Wavelet::ForwardMother();
 
 		for (int i = 0, j = 0; i < size; i += 2, j++)
 		{
@@ -85,8 +85,8 @@ public:
 	{
 		AssertMsg((input.size() & (input.size() - 1)) == 0, "Not a power of 2.");
 
-		const auto& father = typename Wavelet::InverseFather();
-		const auto& mother = typename Wavelet::InverseMother();
+		const auto& father = Wavelet::InverseFather();
+		const auto& mother = Wavelet::InverseMother();
 
 		// How many wavelet kernels overlap this pair?
 		const int halfSize = size / 2;

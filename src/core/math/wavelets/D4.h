@@ -9,7 +9,7 @@ class D4 : public Wavelet1D<D4<Real>, Real, -1, 2>
 public:
 	D4() = delete;
 
-	using kType = typename Real;
+	using kType = Real;
 	static constexpr int kSize = 4;
 
 	inline static const std::array<kType, kSize>& ForwardFather()

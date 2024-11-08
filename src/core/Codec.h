@@ -1,11 +1,11 @@
 #pragma once
 
 #include "CompressedImageData.h"
-#include "Image.h"
-#include "coder/ArithmeticCoder.h"
-#include "wavelets/NormalisedDWT.h"
+#include "image/Image.h"
+#include "coders/ArithmeticCoder.h"
+#include "math/wavelets/NormalisedDWT.h"
 
-namespace HDRI
+namespace Flair
 {
 	enum CodecFlags : uint32_t 
 	{ 
@@ -18,6 +18,25 @@ namespace HDRI
 	
 	class Codec
 	{
+	public:
+		struct Params
+		{
+			Params();
+			Params& operator=(const Params& other);
+
+			uint32_t			flags;
+			float				quantQuality;
+			float				quantAttenuation;
+			float				imageGamma;
+			float			    quantiseGamma;
+			float				threshold;
+			float				thresholdAttenuation;
+			int					minCompressedPrecinct;
+			int					minQuant;
+			float				quantRounding;
+			int					dwtFlags;
+		};
+
 	private:
 		enum ChannelTypes : int { kChannelY, kChannelU, kChannelV };
 		using CoderModelType = uint16_t;
@@ -25,50 +44,48 @@ namespace HDRI
 	public:
 		Codec(const uint32_t flags = 0u);
 
-		void				Serialise(const std::string& outputPath, const Image3f& inputImage);
-		Image3f				Deserialise(const std::string& inputPath, Image3f& outputImage);
-
 		void      			Encode(const Image3f& inputImage, CompressedImageData& decomposed);
 		void				Decode(const CompressedImageData& decomposed, Image3f& outputImage);
 
-		void				DecodeWaveletCoeffs(const Image3f& waveletCoeffs, Image3f& outputImage) const;
+		//void				DecodeWaveletCoeffs(const Image3f& waveletCoeffs, Image3f& outputImage) const;
 		const Image3f&		GetWaveletData() const { return m_waveletCoeffs; }
+
+		const Params&       GetEncoderParams() const { return m_params; }
+		void				SetEncoderParams(const Params& params);
+
 	private:
 		void				PrepareEncoder(const int width, const int height);
 		void				PrepareDecoder(const CompressedImageData& image);
 
 		void				EncodeChannel(Image1f& chnlData, Image1f* waveletData, const int chnlIdx, CompressedChannelData& decompData);
-		void				DecodeChannel(const CompressedChannelData& decompData, const int chnlIdx, Image1f& chnlData);
+		Image1f				DecodeChannel(const CompressedChannelData& decompData, const int chnlIdx);
+
+		inline float		GetPrecinctThreshold(const int precinctIdx, const CoderModelType rate) const;
 
 		template<typename... Pack>
 		inline void Log(const char* fmt, Pack... pack)
 		{
-			if (m_flags & kVerbose)
+			if (m_params.flags & kVerbose)
 			{
-				std::printf(fmt, pack...);
+				std::cout << tfm::format(fmt, pack...);
 			}
 		}
 
 	private:
-		Image3f				m_waveletCoeffs;
-		uint32_t			m_flags;
-		NormalisedDWT<CDF97<float>> m_dwt;
+		Params				m_params;
 
 		int					m_width;
 		int					m_height;
 		int					m_area;
 		int					m_numPrecincts;
-		float				m_quality;
 
 		std::vector<int>	m_quantRatesY;
 		std::vector<int>	m_quantRatesUV;
-		float				m_thresholdY;
-		float				m_thresholdUV;
-		float				m_gamma;
-		int					m_minCompressedPrecinct;
 		bool				m_normaliseCoeffs;
 		int					m_maxQuant;
 		int					m_minQuantY;
 		int					m_minQuantUV;
+
+		Image3f				m_waveletCoeffs;
 	};
 }

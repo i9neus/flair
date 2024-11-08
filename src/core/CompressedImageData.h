@@ -1,11 +1,12 @@
 ﻿#pragma once
 
 #include "Includes.h"
-#include "ByteStream.h"
-#include "coder/ArithmeticCoder.h"
+#include "io/InputStream.h"
+#include "io/OutputStream.h"
+#include "coders/ArithmeticCoder.h"
 #include "CompressedChannelData.h"
 
-namespace HDRI
+namespace Flair
 {
 	namespace MagicNumbers
 	{
@@ -20,15 +21,21 @@ namespace HDRI
 		// Stored at the beginning of the stream
 		struct StreamImageHeader
 		{
-			MagicType										magic = MagicNumbers::kImageHeader;
+			StreamImageHeader()
+			{
+				std::memset(this, 0, sizeof(StreamImageHeader));
+				magic = MagicNumbers::kImageHeader;
+			}
+			
+			MagicType										magic;
 			int												width;
 			int												height;
 			int												channels;
-			float											gamma;
-			float											quality;
+			float											imageGamma;
+			float											quantiseGamma;
+			float											quantQuality;
+			float											quantAttenuation;
 			uint32_t										encoderFlags;
-			float											thresholdY;
-			float											thresholdUV;
 			int												numPrecincts;
 
 			int												coderModelEntrySize;
@@ -44,11 +51,14 @@ namespace HDRI
 			header.channels = 3;
 		}
 
-		void Serialise(ByteStream& stream)
+		CompressedImageData(InputStream& stream) : CompressedImageData()
+		{
+			Deserialise(stream);
+		}
+
+		void Serialise(OutputStream& stream)
 		{
 			AssertMsg(header.channels == kChannels, "Serialiser only supports 3 channels");
-
-			stream.Clear();
 
 			// Write the file header
 			using ModelType = CompressedChannelData::PrecinctModel::value_type::first_type;
@@ -61,7 +71,7 @@ namespace HDRI
 			}
 		}
 
-		void Deserialise(ByteStream& stream)
+		void Deserialise(InputStream& stream)
 		{
 			stream.Seek(0);
 

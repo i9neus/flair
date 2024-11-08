@@ -1,26 +1,80 @@
 #include "Codec.h"
 
-#include "Hilbert2D.h"
-#include "wavelets/NormalisedDWT.h"
+#include "math/Hilbert2D.h"
+#include "math/Hash.h"
+#include "math/wavelets/NormalisedDWT.h"
 #include "Viewer/math/MathUtils.h"
-#include "coder/RLECoder.h"
+#include "coders/RLECoder.h"
+#include "image/Operators.h"
 
-namespace HDRI
+#ifdef FLAIR_ENABLE_MULTITHREADING
+#include <thread>
+#endif
+
+namespace Flair
 {
-    static constexpr float kDither = 0.f;
-    static constexpr int kMaxCoeff = 1;
+    // These parameters determine the performance of the compressor. Only the quality setting should be exposed to the user of the library.
+    Codec::Params::Params()
+    {
+        // Configuation flags for the primary codec.
+        // kUseRLE            = Apply run-length encoding to the quantised coefficients
+        // kRemapHilbert      = Remap quantised coefficients to a hilbert curve to make RLE coding more effective
+        flags = kRemapHilbert | kUseRLE;        
+
+        // Quality is a normalised parameter between 0 and 1. It determines the base quantisation rate i.e. the aggressiveness of the quantisation rate at the finest precinct.
+        quantQuality = 0.3;
+
+        // Attenuation determine how lower precincts are more highly quantised than higher ones. The default is 4.
+        quantAttenuation = 2.;
+        
+        // The lowest precinct below which data aren't compressed but instead are written out as half-precision floats
+        minCompressedPrecinct = 4;
+        
+        // The gamma space of the input image
+        imageGamma = 2.2;
+
+        // The gamma space used to quantise coefficient. Higher value = greater capacity to distinguish fine details.
+        quantiseGamma = 1.;
+
+        // The amount of thresholding to be applied as a proportion of the per-precinct quantisataion rate
+        threshold = 0.5;
+
+        // How much the coefficient thresholding is attenuated based on the precinct index (where precinctThreshold = threshold * thresholdAttenuation ^ (numPrecincts - precinctIdx - 1))
+        thresholdAttenuation = 1.;
+
+        // The minimum quantisation level 
+        minQuant = 4;
+
+        // How quantised coefficients are rounded. A value of 0.5 is the same as calling std::round(q)
+        quantRounding = 0.;
+
+        // The flags used to initialise the wavelet transforms
+        dwtFlags = kDWTLogSpace;
+    }
+
+    Codec::Params& Codec::Params::operator=(const Codec::Params& other)
+    {
+        std::memcpy(this, &other, sizeof(Codec::Params));
+
+        quantQuality = clamp(quantQuality, -1.f, 1.f);
+        minCompressedPrecinct = std::max(0, minCompressedPrecinct);
+        imageGamma = clamp(imageGamma, 1e-3f, 100.f);
+        threshold = std::max(0.f, threshold);
+        thresholdAttenuation = clamp(thresholdAttenuation, 1.f, 1e-3f);
+
+        return *this;
+    }
     
     Codec::Codec(const uint32_t flags)
     {
-        m_flags = kRemapHilbert | kUseRLE;
-        m_flags |= flags;
-        
-        m_minCompressedPrecinct = 4;
-        m_gamma = 2.2;
-        // NOTE: Quality is a normalised parameter between -1 and 1. 
-        m_quality = 0.3f;
+        m_params.flags |= flags;     
 
-        AssertMsg(m_minCompressedPrecinct >= 1, "minCompressedPrecinct must be >= 1");
+        AssertMsg(m_params.minCompressedPrecinct >= 1, "minCompressedPrecinct must be >= 1");
+    }
+
+    void Codec::SetEncoderParams(const Params& params)
+    {
+        m_params = params;
     }
 
     void Codec::PrepareEncoder(const int width, const int height)
@@ -37,74 +91,57 @@ namespace HDRI
         m_numPrecincts = 1 + std::log2(1 + m_width);
         m_quantRatesY.resize(m_numPrecincts, m_maxQuant);
         m_quantRatesUV.resize(m_numPrecincts, m_maxQuant);
-        m_thresholdY = 0.1f;
 
         // Maximum quantisation rate is half the size of the coder model datatype
-        const float quantQuality = std::pow(saturate(m_quality), 4.0f);
+        const float quantQuality = std::pow(saturate(m_params.quantQuality), 4.0f);
         m_maxQuant = std::numeric_limits<CoderModelType>::max() / 2;
-        m_minQuantY = int(std::round(mix(4., 1024., quantQuality)));
-        m_minQuantUV = std::max(4, m_minQuantY / 4);
-        m_thresholdY = 2 / m_minQuantY;
-        m_thresholdUV = 2. / m_minQuantUV;
+        m_minQuantY = int(std::round(mix(float(m_params.minQuant), 1024.f, quantQuality)));
+        m_minQuantUV = std::max(m_params.minQuant, m_minQuantY / 4);
 
-        std::printf("Quality %f: m_minQuantY = %i\n", m_quality, m_minQuantY);
-
-        Log("Quantisation rates:");
+        // For negative quality values, the quanisation rates are increased more slowly so that lower precincts are quantised more aggressively
+        Log("Quantisation rates:\n");
         float qY = m_minQuantY, qUV = m_minQuantUV;
-        const float dqY = mix(1.f, 4.f, saturate(1. + m_quality));
-        const float dqUV = mix(1.f, 2.f, saturate(1. + m_quality));
-
         for (int i = m_quantRatesY.size() - 1; i >= 0; --i)
         {
             m_quantRatesY[i] = qY;
             m_quantRatesUV[i] = qUV;
-            qY = std::min(float(m_maxQuant), qY * dqY);
-            qUV = std::min(float(m_maxQuant), qUV * dqUV);
+            qY = std::min(float(m_maxQuant), qY * m_params.quantAttenuation);
+            qUV = std::min(float(m_maxQuant), qUV * m_params.quantAttenuation);
 
             Log("  - %i: Y: %i, UV: %i\n", i, m_quantRatesY[i], m_quantRatesUV[i]);
         }
-
-        // Prepare the discrete wavelet transform
-        m_dwt.Prepare(m_width, 0);// kDWTLogSpace);
     }
 
     void Codec::PrepareDecoder(const CompressedImageData& image)
-    {
+    {        
         m_width = image.header.width;
         m_height = image.header.height;
         m_area = m_width * m_height;
-        m_quality = image.header.quality;
-        m_flags = image.header.encoderFlags;
         m_numPrecincts = image.header.numPrecincts;
-        m_gamma = image.header.gamma;
         m_quantRatesY = image.channelData[0].quantRates;
         m_quantRatesUV = image.channelData[1].quantRates;
-        m_thresholdY = image.header.thresholdY;
-        m_thresholdUV = image.header.thresholdUV;
+        m_params.quantQuality = image.header.quantQuality;
+        m_params.quantAttenuation = image.header.quantAttenuation;
+        m_params.imageGamma = image.header.imageGamma;
+        m_params.quantiseGamma = image.header.quantiseGamma;
+        m_params.flags = image.header.encoderFlags;
+        
 
         AssertMsg(m_width == m_height, "Codec only supports square images.");
         int bitsSet = 0;
         for (int i = 0; i < 31; ++i) { bitsSet += ((m_width & (1 << i)) != 0); }
         AssertFmt(bitsSet == 1, "Codec only supports image dimensions in powers of two (input is %i x %i) %i", m_width, m_height, bitsSet);
-
-        // Prepare the discrete wavelet transform
-        m_dwt.Prepare(m_width, 0);// kDWTLogSpace);
     }
 
     // Encodes a single image channel into a compressed bitstream stored in decompData
     void Codec::EncodeChannel(Image1f& chnlData, Image1f* waveletData, const int chnlIdx, CompressedChannelData& decompData)
     {
-        Log("Encoding channel %i...\n", chnlIdx);
-        
         // In-place transform the image using the DCT
-        m_dwt.Forward(chnlData.Vector(), decompData.dwtPassNorms);
-
-        // Threshold the resulting coefficients based on the channel type
-        const float threshold = (chnlIdx == kChannelY) ? m_thresholdY : m_thresholdUV;
-        //const float threshold = 0.;
+        NormalisedDWT<CDF97<float>> dwt(m_width, m_params.dwtFlags);
+        dwt.Forward(chnlData.Vector(), decompData.dwtPassNorms);
 
         // Store the uncompressed precinct data
-        decompData.header.minCompressedPrecinct = m_minCompressedPrecinct;
+        decompData.header.minCompressedPrecinct = m_params.minCompressedPrecinct;
         decompData.header.numPrecincts = m_numPrecincts;
         decompData.uncompressedPrecinctData.resize(1);
         decompData.compressedPrecinctData.resize(m_numPrecincts);
@@ -114,7 +151,7 @@ namespace HDRI
 
         // DC is always stored explicitly
         decompData.uncompressedPrecinctData[0] = chnlData[0];
-        if (waveletData) { (*waveletData)[0] = chnlData[0]; }
+        if (waveletData) { (*waveletData)[0] = std::abs(chnlData[0]); }
 
         // Go precinct by precint...
         for (int quadrantSize = 1, precinctIdx = 1; 
@@ -123,7 +160,7 @@ namespace HDRI
         {
             // Select quantisation rate based on the precinct and the index of the channel
             const CoderModelType rate = (chnlIdx == kChannelY) ? m_quantRatesY[precinctIdx] : m_quantRatesUV[precinctIdx];
-            const float precinctThreshold = threshold * std::pow(0.25, float(precinctIdx));
+            const float precinctThreshold = GetPrecinctThreshold(precinctIdx, rate);
             const int quadrantArea = sqr(quadrantSize);
 
             // Traverse the three quadrants of the image making up the precinct
@@ -143,33 +180,38 @@ namespace HDRI
                                 float f = chnlData[pixelIdx];
 
                                 // For the lowest precincts, we don't compress the data but instead store it explicitly
-                                if (precinctIdx < m_minCompressedPrecinct)
+                                if (precinctIdx < m_params.minCompressedPrecinct)
                                 {
                                     decompData.uncompressedPrecinctData.push_back(f);
                                 }
                                 else
                                 {
+                                    const int32_t signf = sign(f);
+
+                                    // Map into the quantised gamma space
+                                    f = std::pow(std::abs(f), 1 / m_params.quantiseGamma);
+                                    
                                     // Apply deadzone (thresholding) by offsetting and clamping
-                                    f = std::max(0.f, std::abs(f) - precinctThreshold) * sign(f);
+                                    f = std::max(0.f, f - precinctThreshold) / (1. - precinctThreshold);                                 
 
-                                    // Scale to the quantisation rate and apply dithering
-                                    f = std::max(0.f, kDither + std::abs(f / kMaxCoeff) * rate) * sign(f);
-
-                                    // Quantise to integer
-                                    const CoderModelType quant = clamp(int(f) + (rate - 1), 0, 2 * rate);
+                                    // Quantise to integer               
+                                    int32_t quant = int(m_params.quantRounding + f * rate) * signf + rate;
 
                                     // Store the coefficient, remapping to a Hilbert curve if necessary
-                                    const auto qIdx = (m_flags & kRemapHilbert) ? (quadIdx * quadrantArea + Hilbert2D::ToCurve(quadrantSize, x, y)) : quantIdx;
-                                    quantisedData[qIdx] = quant;
+                                    const auto qIdx = (m_params.flags & kRemapHilbert) ? (quadIdx * quadrantArea + Hilbert2D::ToCurve(quadrantSize, x, y)) : quantIdx;
+                                    quantisedData[qIdx] = CoderModelType(clamp(quant, 0, int32_t(std::numeric_limits<CoderModelType>::max())));
 
                                     // Check for constant data
-                                    if (quant != rate - 1) { isPrecinctEmpty = false; }
+                                    if (f != 0) { isPrecinctEmpty = false; }
 
                                     if (waveletData)
                                     {
                                         // Store the wavelet coefficients for diagnostics
-                                        (*waveletData)[pixelIdx] = kMaxCoeff * (float(quant) - (rate - 1)) / rate;
-                                        //(*waveletData)[pixelIdx] = std::abs(chnlData[pixelIdx]);
+                                        auto& g = (*waveletData)[pixelIdx];
+                                        g = (float(quant) - rate) / rate;
+                                        g = std::abs(g);
+                                        //g = std::abs(chnlData[pixelIdx]);//     <--- Output unquantised wavelet coefficients
+                                        g = std::pow(g, 2.2f);
                                     }
                                 }
                             }
@@ -179,69 +221,71 @@ namespace HDRI
                 }
             }
 
-            if (precinctIdx >= m_minCompressedPrecinct)
+            if (precinctIdx >= m_params.minCompressedPrecinct)
             {
                 auto& compressedPrecinct = decompData.compressedPrecinctData[precinctIdx];
-                
+
                 // If the precinct contains no data (common with highly compressed channels), we don't need to compress anything
                 if (isPrecinctEmpty)
                 {
-                    compressedPrecinct.header.flags |= CompressedChannelData::kPrecinctEmpty;
+                    compressedPrecinct.header.flags |= CompressedPrecinctData::kPrecinctEmpty;
                 }
                 else
                 {
                     ArithmeticCoder<CoderModelType> arithCoder;
-                    if (m_flags & kUseRLE)
+                    if (m_params.flags & kUseRLE)
                     {
                         // Run-length encode the quantised coefficients
                         std::vector<CoderModelType> rleData;
                         RLECoder<CoderModelType>::Encode(quantisedData, rate - 1, 32, rleData, compressedPrecinct.rleBlockTable);
 
                         // Arithmetic encode the RLE data
-                        arithCoder.Build(rleData, (m_flags & kDebugCoder) != 0);
-                        compressedPrecinct.compressedData = arithCoder.Encode(rleData); Assert(!compressedPrecinct.compressedData.empty());
-                        compressedPrecinct.arithModel = arithCoder.GetModel(); Assert(!compressedPrecinct.arithModel.empty());
-                        Log("  - %i : %i -> %i bytes\n", precinctIdx, sizeof(CoderModelType) * rleData.size(), sizeof(uint8_t) * compressedPrecinct.compressedData.size() + compressedPrecinct.rleBlockTable.size() * sizeof(uint16_t));
-                        Log("         Table size: %i\n", compressedPrecinct.rleBlockTable.size() * sizeof(uint16_t));
+                        arithCoder.Build(rleData, (m_params.flags & kDebugCoder) != 0);
+                        compressedPrecinct.compressedData = arithCoder.Encode(rleData);
+                        compressedPrecinct.arithModel = arithCoder.GetModel();
+                        Assert(!compressedPrecinct.compressedData.empty());
+                        Assert(!compressedPrecinct.arithModel.empty());
                     }
                     else
                     {
                         // Encode the quantised coefficients and store the bitstream along with the derived coding model
-                        arithCoder.Build(quantisedData, (m_flags & kDebugCoder) != 0);
+                        arithCoder.Build(quantisedData, (m_params.flags & kDebugCoder) != 0);
                         compressedPrecinct.compressedData = arithCoder.Encode(quantisedData);
                         compressedPrecinct.arithModel = arithCoder.GetModel(); Assert(!compressedPrecinct.arithModel.empty());
-                        Log("  - %i : %i -> %i bytes\n", precinctIdx, sizeof(CoderModelType) * quantisedData.size(), sizeof(uint8_t) * compressedPrecinct.compressedData.size());
                     }
                 }
             }
         }
     }
 
-    void Codec::DecodeChannel(const CompressedChannelData& decompData, const int chnlIdx, Image1f& chnlData)
+    float Codec::GetPrecinctThreshold(const int precinctIdx, const CoderModelType rate) const
+    {
+        return (m_params.threshold / rate) * std::pow(m_params.thresholdAttenuation, float(m_numPrecincts - precinctIdx - 1));
+    }
+
+    Image1f Codec::DecodeChannel(const CompressedChannelData& decompData, const int chnlIdx)
     {
         ArithmeticCoder<CoderModelType> arithCoder;
-        chnlData.Erase();
-        
+        Image1f chnlData(m_width, m_height);
+
         // DC is always stored explicitly
         auto explicitIt = decompData.uncompressedPrecinctData.begin();
         chnlData[0] = *explicitIt;
         ++explicitIt;
 
-        const float threshold = (chnlIdx == kChannelY) ? m_thresholdY : m_thresholdUV;
-        
         // Go precinct by precint...
         for (int quadrantSize = 1, precinctIdx = 1;
-            quadrantSize != m_width; 
+            quadrantSize != m_width;
             quadrantSize <<= 1, ++precinctIdx)
-        {       
+        {
             auto& compressedPrecinct = decompData.compressedPrecinctData[precinctIdx];
 
             // If this precinct contains no data, skip it and move on
             if (compressedPrecinct.header.flags & CompressedChannelData::kPrecinctEmpty) { continue; }
-            
+
             // Select quantisation rate based on the index of the channel
             const CoderModelType rate = (chnlIdx == kChannelY) ? m_quantRatesY[precinctIdx] : m_quantRatesUV[precinctIdx];
-            const float precinctThreshold = threshold * std::pow(0.25, float(precinctIdx));
+            const float precinctThreshold = GetPrecinctThreshold(precinctIdx, rate);
             const int quadrantArea = sqr(quadrantSize);
             
             std::vector<CoderModelType> quantisedData;
@@ -250,7 +294,7 @@ namespace HDRI
                 // Decode the bitstream using the associated model
                 arithCoder.SetModel(compressedPrecinct.arithModel);
 
-                if (m_flags & kUseRLE)
+                if (m_params.flags & kUseRLE)
                 {
                     Assert(!compressedPrecinct.rleBlockTable.empty());
                     std::vector<CoderModelType> rleData = arithCoder.Decode(compressedPrecinct.compressedData);                    
@@ -263,7 +307,7 @@ namespace HDRI
 
                 // Sanity check
                 AssertFmt(quantisedData.size() == quadrantArea * 3,
-                    "Size of decoded precinct data does not match the area of the precinct (is %i, should be %i)", quantisedData.size(), quadrantArea * 3);
+                    "Size of decoded precinct data does not match the area of the precinct (is %zi, should be %i)", quantisedData.size(), quadrantArea * 3);
             }
 
             // Dequantise the precinct
@@ -280,6 +324,7 @@ namespace HDRI
                             {
                                 float& f = chnlData[pixelIdx];
 
+                                // For uncompressed precincts, just copy the data straight over
                                 if (precinctIdx < decompData.header.minCompressedPrecinct)
                                 {
                                     Assert(explicitIt != decompData.uncompressedPrecinctData.end());
@@ -289,12 +334,18 @@ namespace HDRI
                                 else
                                 {
                                     // Dequantise
-                                    const auto qIdx = (m_flags & kRemapHilbert) ? (quadIdx * quadrantArea + Hilbert2D::ToCurve(quadrantSize, x, y)) : quantIdx;
-                                    int quant = quantisedData[qIdx] - (rate - 1);
-                                    f = float(kMaxCoeff * quant) / rate;
+                                    const auto qIdx = (m_params.flags & kRemapHilbert) ? (quadIdx * quadrantArea + Hilbert2D::ToCurve(quadrantSize, x, y)) : quantIdx;
+                                    int quant = quantisedData[qIdx] - rate; 
+                                    f = float(quant);
+                                    f = sign(f) * std::max(0.f, std::abs(f) - m_params.quantRounding) / rate;
 
                                     // Compensate for the dead zone. If value is non-zero, apply the threshold based on the sign of the coefficient
-                                    if (quant != 0) { f += precinctThreshold * sign(f); }
+                                    if (quant != 0) 
+                                    { 
+                                        f = mix(precinctThreshold, 1.f, std::abs(f)) * sign(f);
+                                    }
+
+                                    f = std::pow(std::abs(f), m_params.quantiseGamma) * sign(f);
                                 }
                             }
                         }
@@ -306,43 +357,51 @@ namespace HDRI
         }
 
         // In-place inverse transform the image using the DCT
-        m_dwt.Inverse(chnlData.Vector(), decompData.dwtPassNorms);
+        NormalisedDWT<CDF97<float>> dwt(m_width, m_params.dwtFlags);
+        dwt.Inverse(chnlData.Vector(), decompData.dwtPassNorms);
+
+        return chnlData;
     }
 
     void Codec::Encode(const Image3f& inputImage, CompressedImageData& compImage)
     {
+        compImage = CompressedImageData();
+        
         PrepareEncoder(inputImage.Width(), inputImage.Height());
 
         compImage.header.width = inputImage.Width();
         compImage.header.height = inputImage.Height();
-        compImage.header.gamma = m_gamma;
+        compImage.header.imageGamma = m_params.imageGamma;
+        compImage.header.quantiseGamma = m_params.quantiseGamma;
         compImage.header.numPrecincts = m_numPrecincts;
-        compImage.header.thresholdY = m_thresholdY;
-        compImage.header.thresholdUV = m_thresholdUV;
-        compImage.header.quality = m_quality;
-        compImage.header.encoderFlags = m_flags;
+        compImage.header.quantQuality = m_params.quantQuality;
+        compImage.header.quantAttenuation = m_params.quantAttenuation;
+        compImage.header.encoderFlags = m_params.flags;
         
         Image3f remappedImage = inputImage;
 
         // Transform the image to gamma-corrected space
-        remappedImage.ApplyGamma(1. / m_gamma);
+        remappedImage.ApplyGamma(1. / m_params.imageGamma);
 
         // Transform into YUV colour space
         remappedImage.RGBToYUV();
 
         // If we're outputting diagnostic wavelet coefficients, initialise the buffer here
-        Image1f chnlData(inputImage.Width(), inputImage.Height());
-        std::unique_ptr<Image1f> waveletChnlData;
-        if (m_flags & kOutputWaveletData)
+        if (m_params.flags & kOutputWaveletData)
         {
             m_waveletCoeffs.Resize(inputImage.Width(), inputImage.Height());
-            waveletChnlData.reset(new Image1f(inputImage.Width(), inputImage.Height()));
         }
-        
-        // Encode the image channel by channel
-        for (int chnlIdx = 0; chnlIdx < 3; ++chnlIdx)
+
+        // Functor that extracts a channel from the image, encodes it, then emplaces any generated wavelet coefficients
+        std::function<void(int)> EncodeChannelFunctor = [&, this](int chnlIdx)
         {
-            remappedImage.ExtractChannel(chnlData, chnlIdx);
+            std::unique_ptr<Image1f> waveletChnlData;
+            if (m_params.flags & kOutputWaveletData)
+            {
+                waveletChnlData.reset(new Image1f(inputImage.Width(), inputImage.Height()));
+            }
+            
+            Image1f chnlData = remappedImage.ExtractChannel(chnlIdx);
 
             EncodeChannel(chnlData, waveletChnlData.get(), chnlIdx, compImage.channelData[chnlIdx]);
 
@@ -350,7 +409,25 @@ namespace HDRI
             {
                 m_waveletCoeffs.EmplaceChannel(*waveletChnlData, chnlIdx);
             }
+        };
+
+#ifdef FLAIR_ENABLE_MULTITHREADING
+        
+        std::vector<std::thread> workerThreads;
+        for (int chnlIdx = 0; chnlIdx < 3; ++chnlIdx)
+        {
+            workerThreads.emplace_back(EncodeChannelFunctor, chnlIdx);
+            Assert(workerThreads.back().joinable());
         }
+        for (auto& t : workerThreads) { t.join(); }
+
+#else
+        // Encode the image channel by channel
+        for (int chnlIdx = 0; chnlIdx < 3; ++chnlIdx)
+        {
+            EncodeChannelFunctor(chnlIdx);
+        }
+#endif
     }
 
     /*void Codec::DecodeWaveletCoeffs(const Image3f& waveletCoeffs, Image3f& outputImage) const
@@ -373,33 +450,45 @@ namespace HDRI
         outputImage.YUVToRGB();
 
         // Transform the image to gamma-corrected space
-        outputImage.ApplyGamma(m_gamma);
+        outputImage.ApplyGamma(m_params.gamma);
     }*/
 
     void Codec::Decode(const CompressedImageData& compImage, Image3f& outputImage)
     {
-        PrepareDecoder(compImage);
-        //PrepareEncoder(compImage.width, compImage.height);
-        
-        /*m_gamma = compImage.gamma;
-        m_numPrecincts = compImage.numPrecincts;
-        m_quantRatesY = compImage.channelData[0].quantRates;
-        m_quantRatesUV = compImage.channelData[1].quantRates;*/
+        PrepareDecoder(compImage);       
 
         outputImage.Resize(m_width, m_height);
-        Image1f chnlData(m_width, m_height);
 
-        for (int chnlIdx = 0; chnlIdx < 3; ++chnlIdx)
+        // Functor that decodes a channel then emplaces it in the decompressed image
+        std::function<void(int)> DecodeChannelFunctor = [&, this](int chnlIdx)
         {
-            DecodeChannel(compImage.channelData[chnlIdx], chnlIdx, chnlData);
+            const Image1f chnlData = DecodeChannel(compImage.channelData[chnlIdx], chnlIdx);    
 
             outputImage.EmplaceChannel(chnlData, chnlIdx);
+        };
+
+#ifdef FLAIR_ENABLE_MULTITHREADING
+
+        std::vector<std::thread> workerThreads;
+        for (int chnlIdx = 0; chnlIdx < 3; ++chnlIdx)
+        {
+            workerThreads.emplace_back(DecodeChannelFunctor, chnlIdx);
+            Assert(workerThreads.back().joinable());
         }
+        for (auto& t : workerThreads) { t.join(); }
+
+#else
+        // Encode the image channel by channel
+        for (int chnlIdx = 0; chnlIdx < 3; ++chnlIdx)
+        {
+            DecodeChannelFunctor(chnlIdx);
+        }
+#endif
 
         // Transform back into RGB colour space
         outputImage.YUVToRGB();
 
         // Transform the image to gamma-corrected space
-        outputImage.ApplyGamma(m_gamma);
+        outputImage.ApplyGamma(m_params.imageGamma);
     }
 }

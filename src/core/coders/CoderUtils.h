@@ -2,7 +2,7 @@
 
 #include "../Includes.h"
 
-namespace HDRI
+namespace Flair
 {
     template<typename T>
     static std::string bstr(const T& t, const bool truncate = false)
@@ -110,6 +110,6 @@ namespace HDRI
     inline unsigned char XorHash8(const std::vector<T>& input)
     {
         const unsigned char* data = reinterpret_cast<const unsigned char*>(input.data());
-        return XorHash8(data, data.size() * sizeof(T));
+        return XorHash8(data, input.size() * sizeof(T));
     }
 }

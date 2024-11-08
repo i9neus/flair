@@ -5,7 +5,7 @@
 #include "CDF53.h"
 #include "CDF97.h"
 
-namespace HDRI
+namespace Flair
 {
 	/*
 	*  Discrete wavelet transform parameterised by PrimaryWavelet mother/father pair.
@@ -127,7 +127,7 @@ namespace HDRI
 		void ValidateInput(std::vector<Real>& inputData)
 		{
 			AssertMsg(m_blockSize > 0, "DWT was not initialised with Prepare().");
-			AssertFmt(inputData.size() >= sqr(m_blockSize), "Input data of size %i is not large enough for block size of %i.", inputData.size(), m_blockSize);
+			AssertFmt(inputData.size() >= sqr(m_blockSize), "Input data of size %zi is not large enough for block size of %i.", inputData.size(), m_blockSize);
 		}
 
 	public:

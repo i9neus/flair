@@ -2,35 +2,45 @@
 
 #include "CoderUtils.h" 
 
-namespace HDRI
+// GCC throws a bunch of warnings for kBlockSizeMask and related constexrps due to bitwise not triggering implicit promition to int
+// then back to uint16_t. Temporarily disable these warnings here.
+#if defined(__GNUC__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Woverflow"
+    #if defined(__EMSCRIPTEN__)
+        #pragma GCC diagnostic ignored "-Wconstant-conversion"
+    #endif
+#endif
+
+namespace Flair
 {
     /*
     * Simple run-length coder for HDRI codec.
-    * 
+    *
     * Encoder ingests a vector of integers and returns a reduced vector of RLE encoded integers plus a block table describing the layout of the data.
     * Encoder pass looks for contiguous blocks of a designated token (corresponding to quantised zero) larger than kMinRLEBlockSize. If found,
     * it creates an entry in the table signalling the length of the constant block. Other data is stored in a similar way, with table entries
     * indicating the run length of non-constant blocks.
-    * 
+    *
     * Block format (assuming 16-bit table type)
     *   - Bit 31:    0 = non-const data, 1 = const data
     *   - Bits 0-30: Number of values in the block
-    * 
+    *
     * */
 
     template<typename InputType>
     class RLECoder
     {
-    public:        
+    public:
         using TableType = uint16_t;
         using BlockTable = std::vector<TableType>;
 
     private:
         std::vector<uint16_t>               m_blocks;
         static constexpr int                kMinEncodingSize = 4;
-        static constexpr InputType          kBlockTypeMask = (1 << (sizeof(TableType) * 8) - 1);
-        static constexpr InputType          kBlockSizeMask = ~kBlockTypeMask;
-        static constexpr InputType          kConstBlockFlag = kBlockTypeMask;
+        static constexpr TableType          kBlockTypeMask = 1 << ((sizeof(TableType) * 8) - 1);
+        static constexpr TableType          kBlockSizeMask = ~kBlockTypeMask;
+        static constexpr TableType          kConstBlockFlag = kBlockTypeMask;
         static constexpr int                kMaxBlockLength = kBlockSizeMask;
 
     public:
@@ -43,7 +53,7 @@ namespace HDRI
         {
             table.clear();
             output.clear();
-            
+
             if (input.size() < kMinEncodingSize)
             {
                 output = input;
@@ -51,10 +61,10 @@ namespace HDRI
             }
 
             for (int i = 0; i < input.size();)
-            {               
+            {
                 // If we've found an RLE token, check for possible spans we can compress...
                 if (input[i] == rleToken)
-                {                    
+                {
                     // Look ahead to determine how long this run is
                     int span = 1;
                     for (int j = i + 1; j < input.size() && input[j] == rleToken; ++j) { ++span; }
@@ -82,7 +92,7 @@ namespace HDRI
                             else
                             {
                                 entry += span;
-                            }                         
+                            }
 
                             i += span;
                             continue;
@@ -91,19 +101,18 @@ namespace HDRI
                         else
                         {
                             i += span;
-                            
+
                             // Keep adding const blocks until we've exhausted the number of remaining tokens covered by the span
                             do
                             {
                                 table.push_back(kConstBlockFlag | InputType(std::min(kMaxBlockLength, span)));
                                 span -= kMaxBlockLength;
-                            } 
-                            while (span > 0);
+                            } while (span > 0);
 
                             continue;
                         }
                     }
-                }               
+                }
 
                 // Append the token to the output and update the last table entry
                 if (table.empty()) { table.push_back(0); }
@@ -119,7 +128,7 @@ namespace HDRI
                 output.push_back(input[i]);
                 ++i;
             }
-            
+
             AssertMsg(GetEncodedLength(table) == input.size(), "RLE encoder error: spanned data size and input size mismatch");
 
             // Return the compression factor of the coder
@@ -147,7 +156,7 @@ namespace HDRI
             float ratioHigh = Encode(input, rleToken, blockSizeHigh, output, table);
             float ratioMid;
 
-            while(std::abs(ratioLow - ratioHigh) > 0.02f && blockSizeHigh - blockSizeLow <= 4)
+            while (std::abs(ratioLow - ratioHigh) > 0.02f && blockSizeHigh - blockSizeLow <= 4)
             {
                 blockSizeMid = (blockSizeLow + blockSizeHigh) / 2;
                 ratioMid = Encode(input, rleToken, blockSizeMid, output, table);
@@ -171,13 +180,13 @@ namespace HDRI
         {
             // An empty table dictates that no compression has occurred
             if (table.empty()) { return input; }
-            
+
             std::vector<InputType> output;
             int i = 0;
             for (const auto entry : table)
             {
                 AssertMsg(entry != 0, "RLE decoder error: table entry should never be zero");
-                
+
                 const int blockSize = entry & kBlockSizeMask;
 
                 // Resize the output buffer and pad with default token
@@ -186,13 +195,17 @@ namespace HDRI
                 // If this entry indicates non-constant data, copy it from the input buffer
                 if (!IsConstBlock(entry))
                 {
-                    AssertFmt(i + blockSize <= input.size(), "RLE decoder error: input buffer too small for block table.");
+                    AssertMsg(i + blockSize <= input.size(), "RLE decoder error: input buffer too small for block table.");
                     memcpy(&output[output.size() - blockSize], &input[i], blockSize * sizeof(InputType));
                     i += blockSize;
-                }    
+                }
             }
 
             return output;
         }
     };
 }
+
+#if defined(__GNUC__)
+#pragma clang diagnostic pop
+#endif

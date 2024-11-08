@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace HDRI
+namespace Flair
 {
     inline uint16_t FloatToHalfBits(const float f32)
     {

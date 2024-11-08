@@ -1,6 +1,6 @@
 #include <stdio.h>
 
-namespace HDRI
+namespace Flair
 {
     class Hilbert2D
     {
