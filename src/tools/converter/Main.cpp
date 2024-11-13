@@ -1,35 +1,20 @@
-
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
-#include <thrust/count.h>
-
-#include "CudaUtils.cuh"
 #include "core/io/ImageIO.h"
 #include "core/io/FilesystemUtils.h"
 #include "core/math/MathUtils.h"
 #include "core/utils/HighResTimer.h"
 #include "core/utils/ConsoleUtils.h"
+#include "core/Codec.h"
 #include "core/analysis/Metrics.h"
-
-#include "LiftingCodec.h"
 
 #include <unordered_map>
 
 namespace Flair
 {
-    __global__ void Test()
-    {
-        printf("%i\n", kKernelIdx);
-    }
-
     void Run(int argc, char* argv[])
     {
         if (argc < 3)
         {
-            std::printf("Usage: exr2flair [input (.exr)] [output (.exr)]\n");
+            std::printf("Usage: converter [input (.exr)] [output (.exr)]\n");
             std::printf("  Params:\n"
                 "  -euler=[x,y,z]      Comma-separated Euler angles in degrees of the HDRI reprojection. E.g. -euler=10,37.8,10.0\n"
                 "  -diagnostics        Test the codec and outputs diagnostics to the same directory as the output file.\n"
@@ -38,7 +23,7 @@ namespace Flair
             return;
         }
 
-        std::printf("exr2flair:\n");
+        std::printf("converter:\n");
 
         // Parse the command line parameters
         std::string inputPath(argv[1]), outputPath(argv[2]);
@@ -66,23 +51,56 @@ namespace Flair
         LoadEXR(inputPath, inputImage);
 
         std::printf("Okay!\n");
+  
+        uint32_t codecFlags = 0;
+        if (verbose) { codecFlags |= Flair::kVerbose; }
+        if (diagnostics) { codecFlags |= Flair::kOutputWaveletData; }
 
-        Flair::LiftingCodec codec;
+        Flair::Codec codec(codecFlags);
 
         // Encode the image
         HighResTimer wallTime;
-        Flair::Image3f outputImage = codec.Encode(inputImage);
+        Flair::Image3f outputImage;
+        Flair::CompressedImageData compressedImage;
+        codec.Encode(inputImage, compressedImage);
 
-        SaveEXR(ReplaceExtension(outputPath, ".wavelet.exr"), outputImage);        
+        // Serialise the compressed image
+        Flair::OutputFileStream outStream(outputPath);
+        compressedImage.Serialise(outStream);
+        outStream.Close();
+        printf_green("Compressed Flair image in %.2fs!\n", wallTime.Get());
+
+        if (diagnostics)
+        {
+            std::printf("Running diagnostics...\n");
+
+            // Load in the file we've just written out
+            wallTime.Reset();
+            Flair::InputStream inStream(outputPath);
+            compressedImage = Flair::CompressedImageData(inStream);
+
+            // Decode the compressed file
+            codec.Decode(compressedImage, outputImage);
+            printf_yellow("Decompressed Flair image in %.2fs!\n", wallTime.Get());
+
+            // Generate and print some stats
+            const auto stats = GenerateCodecStats(outputImage, inputImage, compressedImage);
+            Flair::PrintStats(stats);
+
+            std::printf("Exporting additional data...\n");
+            SaveEXR(ReplaceExtension(outputPath, ".wavelet.exr"), codec.GetWaveletData());
+            SaveEXR(ReplaceExtension(outputPath, ".compressed.exr"), outputImage);
+
+            std::printf("Diagnostic checks complete!\n");
+        }
     }
+
 }
 
 int main(int argc, char* argv[])
 {
     try
     {
-        IsOk(cudaSetDevice(0));
-        
         Flair::Run(argc, argv);
     }
     catch (const std::runtime_error& err)

@@ -66,15 +66,15 @@ public:
 
 			Real c0 = 0;
 			Real c1 = 0;
-			for (int j = i0, k = 0; j <= i1; j++, k++)
+			for (int p = i0, k = 0; p <= i1; p++, k++)
 			{
 				// Assume boundaries are reflected
-				int jMod = j;
-				if (jMod < 0) { jMod = -jMod; }
-				else if (jMod >= size - 1) { jMod = 2 * (size - 1) - jMod; }
+				int pMod = p;
+				if (pMod < 0) { pMod = -pMod; }
+				else if (pMod >= size - 1) { pMod = 2 * (size - 1) - pMod; }
 
-				c0 += input[jMod] * father[k];
-				c1 += input[jMod] * mother[k];
+				c0 += input[pMod] * father[k];
+				c1 += input[pMod] * mother[k];
 			}
 			output[j] = c0;
 			output[j + size / 2] = c1;
