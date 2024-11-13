@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <cstring>
 #include <memory>
-#include "tinyformat.h"
+#include "thirdparty/tinyformat/tinyformat.h"
 
 #define FLAIR_ENABLE_MULTITHREADING
 
