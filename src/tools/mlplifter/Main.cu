@@ -10,6 +10,10 @@
 #include "core/io/ImageIO.h"
 #include "core/io/FilesystemUtils.h"
 #include "core/math/MathUtils.h"
+#include "core/utils/HighResTimer.h"
+#include "core/utils/ConsoleUtils.h"
+#include "core/Codec.h"
+#include "core/analysis/Metrics.h"
 
 #include <unordered_map>
 
@@ -53,10 +57,7 @@ namespace Flair
         if (outputExt != ".flair") { std::printf("Output file must either be .flair"); return; }
 
         const bool verbose = (params.find("verbose") != params.end());
-        const bool diagnostics = (params.find("diagnostics") != params.end());
-
-       
-
+        const bool diagnostics = (params.find("diagnostics") != params.end());     
 
         // Load the image. For now it's just .exrs.
         std::printf("Loading '%s'...\n", inputPath.c_str());
@@ -64,12 +65,7 @@ namespace Flair
         LoadEXR(inputPath, inputImage);
 
         std::printf("Okay!\n");
-
-        // Project the environment map
-        /*std::printf("Reprojecting environment map...\n");
-        Flair::Image3f projectedHdri;
-        ReprojectHemisphere(inputHdri, Vec3(toRad(euler[0]), toRad(euler[1]), toRad(euler[2])), projectedHdri);
-
+  
         uint32_t codecFlags = 0;
         if (verbose) { codecFlags |= Flair::kVerbose; }
         if (diagnostics) { codecFlags |= Flair::kOutputWaveletData; }
@@ -78,9 +74,9 @@ namespace Flair
 
         // Encode the image
         HighResTimer wallTime;
-        Flair::Image3f outputHdri;
+        Flair::Image3f outputImage;
         Flair::CompressedImageData compressedImage;
-        codec.Encode(projectedHdri, compressedImage);
+        codec.Encode(inputImage, compressedImage);
 
         // Serialise the compressed image
         Flair::OutputFileStream outStream(outputPath);
@@ -98,20 +94,19 @@ namespace Flair
             compressedImage = Flair::CompressedImageData(inStream);
 
             // Decode the compressed file
-            codec.Decode(compressedImage, outputHdri);
+            codec.Decode(compressedImage, outputImage);
             printf_yellow("Decompressed Flair image in %.2fs!\n", wallTime.Get());
 
             // Generate and print some stats
-            const auto stats = Flair::GenerateCodecStats(outputHdri, projectedHdri, compressedImage);
+            const auto stats = GenerateCodecStats(outputImage, inputImage, compressedImage);
             Flair::PrintStats(stats);
 
             std::printf("Exporting additional data...\n");
-            SaveEXR(codec.GetWaveletData(), ReplaceExtension(outputPath, ".wavelet.exr"));
-            SaveEXR(projectedHdri, ReplaceExtension(outputPath, ".uncompressed.exr"));
-            SaveEXR(outputHdri, ReplaceExtension(outputPath, ".compressed.exr"));
+            SaveEXR(ReplaceExtension(outputPath, ".wavelet.exr"), codec.GetWaveletData());
+            SaveEXR(ReplaceExtension(outputPath, ".compressed.exr"), outputImage);
 
             std::printf("Diagnostic checks complete!\n");
-        }*/
+        }
 
         //using namespace Flair;
 

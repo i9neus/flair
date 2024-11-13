@@ -3,7 +3,7 @@
 #include "math/Hilbert2D.h"
 #include "math/Hash.h"
 #include "math/wavelets/NormalisedDWT.h"
-#include "Viewer/math/MathUtils.h"
+#include "core/math/MathUtils.h"
 #include "coders/RLECoder.h"
 #include "image/Operators.h"
 

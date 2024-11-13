@@ -44,41 +44,52 @@ namespace Flair
             });
         delete[] exrDataIn;
     }
-
-    template void LoadEXR(const std::string& path, Image<float, 3>& image);
     
-    /*template<typename Type, int Channels>
-    void SaveEXR(Image<Type, Channels>& input, const std::string& filename)
+    template<typename Type, int Channels>
+    void SaveEXR(const std::string& path, const Image<Type, Channels>& image)
     {
+        const auto* pixelData = image.Data();
+        const auto width = image.Width();
+        const auto height = image.Height();
+        
         EXRHeader header;
         InitEXRHeader(&header);
 
-        EXRImage image;
-        InitEXRImage(&image);
+        EXRImage exrImage;
+        InitEXRImage(&exrImage);
 
-        image.num_channels = 3;
+        exrImage.num_channels = 3;
 
-        std::vector<float> images[3];
-        images[0].resize(width * height);
-        images[1].resize(width * height);
-        images[2].resize(width * height);
+        std::vector<float> layers[3];
+        layers[0].resize(width * height, 0.0f);
+        layers[1].resize(width * height, 0.0f);
+        layers[2].resize(width * height, 0.0f);
 
         // Split RGBRGBRGB... into R, G and B layer
         for (int i = 0; i < width * height; i++)
-        {
-            images[0][i] = rgb[3 * i + 0];
-            images[1][i] = rgb[3 * i + 1];
-            images[2][i] = rgb[3 * i + 2];
+        {            
+            // Single-channel images get exported as RGB greyscale
+            if (Channels == 1)
+            {
+                layers[0][i] = layers[1][i] = layers[2][i] = pixelData[i];
+            }
+            else
+            {
+                for (int c = 0; c < Channels; ++c)
+                {
+                    layers[c][i] = pixelData[Channels * i + c];
+                }
+            }
         }
 
         float* image_ptr[3];
-        image_ptr[0] = &(images[2].at(0)); // B
-        image_ptr[1] = &(images[1].at(0)); // G
-        image_ptr[2] = &(images[0].at(0)); // R
+        image_ptr[0] = &(layers[2].at(0)); // B
+        image_ptr[1] = &(layers[1].at(0)); // G
+        image_ptr[2] = &(layers[0].at(0)); // R
 
-        image.images = (unsigned char**)image_ptr;
-        image.width = width;
-        image.height = height;
+        exrImage.images = (unsigned char**)image_ptr;
+        exrImage.width = width;
+        exrImage.height = height;
 
         header.num_channels = 3;
         header.channels = (EXRChannelInfo*)std::malloc(sizeof(EXRChannelInfo) * header.num_channels);
@@ -97,17 +108,23 @@ namespace Flair
         header.compression_type = TINYEXR_COMPRESSIONTYPE_ZIP;
 
         const char* exrErr = NULL; // or nullptr in C++11 or later.
-        int ret = SaveEXRImageToFile(&image, &header, outfilename.c_str(), &exrErr);
+        int ret = SaveEXRImageToFile(&exrImage, &header, path.c_str(), &exrErr);
         if (ret != TINYEXR_SUCCESS)
         {
-            const std::string error = tfm::format("Save EXR err: %s\n", exrErr);
+            const std::string error = tfm::format("%s\n", exrErr);
             FreeEXRErrorMessage(exrErr);
             throw std::runtime_error(error);
         }
-        std::printf("Saved exr file. [ %s ] \n", outfilename.c_str());
+        std::printf("Saved exr file. [ %s ] \n", path.c_str());
 
         std::free(header.channels);
         std::free(header.pixel_types);
         std::free(header.requested_pixel_types);
-    }*/
+    }
+
+    template void LoadEXR(const std::string& path, Image<float, 3>& image);
+    template void LoadEXR(const std::string& path, Image<float, 1>& image);
+
+    template void SaveEXR(const std::string& path, const Image<float, 3>& image);
+    template void SaveEXR(const std::string& path, const Image<float, 1>& image);
 }

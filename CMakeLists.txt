@@ -20,7 +20,6 @@ add_executable(mlplifter
     src/core/io/ImageIO.h
     src/core/io/FilesystemUtils.h
     src/core/math/MathUtils.h
-    src/thirdparty/tinyexr/miniz.c
     src/core/Codec.cpp
 )
 
