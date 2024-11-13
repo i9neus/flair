@@ -51,6 +51,7 @@ namespace Flair
 	public:
 		StaticDWT(const int blockSize) : Base(blockSize)
 		{
+			Base::m_numPasses = int(std::log2(m_blockSize / Haar<Real>::GetMinIOSize())) + 1;
 			m_numPrimaryPasses = int(std::floor(std::log2(m_blockSize / PrimaryWavelet::GetMinIOSize()))) + 1;
 		}
 	};

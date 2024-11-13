@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../Includes.h"
+#include "../math/MathUtils.h"
 #include <functional>
 
 #ifdef FLAIR_ENABLE_MULTITHREADING
@@ -149,10 +150,11 @@ namespace Flair
             }
         }
 
-        void Erase()
-        {
-            for (auto& p : m_data) { p = 0; }
-        }
+        void Erase() { std::memset(m_data.data(), 0, sizeof(Type) * m_data.size()); }
+
+        void Saturate() { for (auto& p : m_data) { p = saturate(p); } }
+
+        void Clamp(const Type lower, const Type upper) { for (auto& p : m_data) { p = clamp(p, lower, upper); } }
 
         void RGBToYUV()
         {

@@ -47,7 +47,7 @@ namespace Flair
 			m_blockSize = blockSize;
 			m_lineInputData.resize(m_blockSize);
 			m_lineOutputData.resize(m_blockSize);
-			m_numPasses = int(std::log2(m_blockSize / Haar<Real>::GetMinIOSize())) + 1;
+			m_numPasses = int(std::log2(m_blockSize / 2)) + 1;
 		}
 
 		virtual void ForwardTransform1D(const int passIdx, const int passSize) = 0;

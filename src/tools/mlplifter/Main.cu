@@ -60,20 +60,25 @@ namespace Flair
         const bool verbose = (params.find("verbose") != params.end());
         const bool diagnostics = (params.find("diagnostics") != params.end());     
 
-        // Load the image. For now it's just .exrs.
         std::printf("Loading '%s'...\n", inputPath.c_str());
         Image3f inputImage;
         LoadEXR(inputPath, inputImage);
-
-        std::printf("Okay!\n");
 
         Flair::LiftingCodec codec;
 
         // Encode the image
         HighResTimer wallTime;
-        Flair::Image3f outputImage = codec.Encode(inputImage);
 
-        SaveEXR(ReplaceExtension(outputPath, ".wavelet.exr"), outputImage);        
+        printf_green("Forward transform...\n");
+        Flair::Image3f waveletImage = codec.Encode(inputImage);
+
+        printf_yellow("Inverse transform...\n");
+        Flair::Image3f decodedImage = codec.Decode(waveletImage);
+
+        SaveEXR(ReplaceExtension(outputPath, ".wavelet.exr"), waveletImage);        
+        SaveEXR(ReplaceExtension(outputPath, ".compressed.exr"), decodedImage);
+
+        std::printf("Completed in %.2fs!\n", wallTime.Get());
     }
 }
 
