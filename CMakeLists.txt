@@ -15,6 +15,13 @@ enable_language(CUDA)
 add_executable(mlplifter
     src/tools/mlplifter/Main.cu
     src/tools/mlplifter/CudaUtils.cuh
+    src/core/Includes.h
+    src/core/io/ImageIO.cpp
+    src/core/io/ImageIO.h
+    src/core/io/FilesystemUtils.h
+    src/core/math/MathUtils.h
+    src/thirdparty/tinyexr/miniz.c
+    src/core/Codec.cpp
 )
 
 target_compile_features(mlplifter PUBLIC cxx_std_17)
