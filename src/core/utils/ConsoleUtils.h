@@ -74,4 +74,9 @@ namespace Flair
     template<typename... Pack> inline void printf_yellow(const char* fmt, Pack... pack) { printf_colour(kANSIFgYellow, fmt, pack...); }
     template<typename... Pack> inline void printf_green(const char* fmt, Pack... pack) { printf_colour(kANSIFgGreen, fmt, pack...); }
 
+    inline void NL(const int number = 1) 
+    { 
+        for (int i = 0; i < number; ++i) { printf("\n"); }
+    }
+
 }

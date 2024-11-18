@@ -14,16 +14,23 @@ enable_language(CUDA)
 
 add_executable(mlplifter
     src/tools/mlplifter/Main.cu
-    src/tools/mlplifter/LiftingCodec.cpp
-    src/tools/mlplifter/LiftingCodec.h
-    src/tools/mlplifter/CudaUtils.cuh
+    #src/tools/mlplifter/LiftingCodec.cpp
+    #src/tools/mlplifter/LiftingCodec.h
+    src/core/utils/cuda/CudaUtils.cuh
+    src/core/utils/cuda/Tensor2D.cuh
+    src/core/utils/cuda/Tensor1D.cuh
+    src/core/utils/cuda/NN.cuh
+    src/core/utils/cuda/RandomDistribution.cuh
+    src/core/utils/cuda/ManagedObject.cuh
+    src/tests/cuda/TensorTests.cu
+    src/tests/cuda/TensorTests.cuh
     src/core/Includes.h
-    src/core/io/ImageIO.cpp
-    src/core/io/ImageIO.h
+    #src/core/io/ImageIO.cpp
+    #src/core/io/ImageIO.h
     src/core/io/FilesystemUtils.h
     src/core/math/MathUtils.h
-    src/core/math/wavelets/cuda/LiftingDWT.cu
-    src/core/math/wavelets/cuda/LiftingDWT.cuh
+    src/core/math/wavelets/cuda/LiftingMLP.cu
+    src/core/math/wavelets/cuda/LiftingMLP.cuh
     src/core/math/wavelets/LiftingDWT.h
 )
 

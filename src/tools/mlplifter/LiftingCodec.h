@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/image/Image.h"
-#include "core/math/wavelets/cuda/LiftingDWT.cuh"
+#include "core/math/wavelets/LiftingDWT.h"
 
 namespace Flair
 {

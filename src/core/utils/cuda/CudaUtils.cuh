@@ -3,20 +3,16 @@
 #include <cuda_runtime.h>
 #include "cuda_fp16.h"
 #include "helper_cuda.h"
+#include "device_launch_parameters.h"
 
 #include "core/Includes.h"
 #include <type_traits>
 #include <math.h>
 
-#define kKernelX				(blockIdx.x * blockDim.x + threadIdx.x)	
-#define kKernelY				(blockIdx.y * blockDim.y + threadIdx.y)	
-#define kKernelIdx				kKernelX
-#define kThreadIdx				(threadIdx.x * blockDim.x + threadIdx.y)
-#define kBlockIdx				(blockIdx.y * gridDim.x + blockIdx.x)
+#define kKernelIdx				(blockIdx.x * blockDim.x + threadIdx.x)	
+#define kThreadIdx              threadIdx.x
+#define kBlockIdx               blockIdx.x
 #define kWarpLane				(threadIdx.x & 31)
-#define kKernelWidth			(gridDim.x * blockDim.x)
-#define kKernelHeight			(gridDim.y * blockDim.y)
-#define kIsFirstThread			(threadIdx.x == 0 && threadIdx.y == 0)
 
 template<typename T> __device__ __forceinline__ T kKernelPos() { return T(typename T::kType(kKernelX), typename T::kType(kKernelY)); }
 template<typename T> __device__ __forceinline__ T kKernelDims() { return T(typename T::kType(kKernelWidth), typename T::kType(kKernelHeight)); }

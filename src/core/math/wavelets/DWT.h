@@ -26,6 +26,7 @@ namespace Flair
 			for (int passIdx = 0; passIdx < m_numPasses; passIdx++, passSize /= 2)
 			{
 				ForwardTransform(inputData, passIdx, passSize);
+				break;
 			}
 		}
 
@@ -36,7 +37,8 @@ namespace Flair
 			int passSize = m_blockSize >> (m_numPasses - 1);
 			for (int passIdx = m_numPasses - 1; passIdx >= 0; passIdx--, passSize *= 2)
 			{
-				InverseTransform(inputData, passIdx, passSize);
+				if(passIdx == 0)
+					InverseTransform(inputData, passIdx, passSize);
 			}
 		}
 

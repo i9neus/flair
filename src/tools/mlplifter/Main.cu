@@ -1,33 +1,26 @@
-
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
-#include <thrust/count.h>
-
-#include "CudaUtils.cuh"
-#include "core/io/ImageIO.h"
+/*#include "core/io/ImageIO.h"
 #include "core/io/FilesystemUtils.h"
 #include "core/math/MathUtils.h"
 #include "core/utils/HighResTimer.h"
 #include "core/utils/ConsoleUtils.h"
 #include "core/analysis/Metrics.h"
 
-#include "LiftingCodec.h"
-
 #include <unordered_map>
+
+#include "LiftingCodec.h"*/
+#include "core\math\wavelets\cuda\LiftingMLP.cuh"
+
 
 namespace Flair
 {
-    __global__ void Test()
-    {
-        printf("%i\n", kKernelIdx);
-    }
-
     void Run(int argc, char* argv[])
     {
-        if (argc < 3)
+        LiftingMLP liftingMLP;
+        liftingMLP.Test();
+
+        return;
+        
+        /*if (argc < 3)
         {
             std::printf("Usage: exr2flair [input (.exr)] [output (.exr)]\n");
             std::printf("  Params:\n"
@@ -78,7 +71,7 @@ namespace Flair
         SaveEXR(ReplaceExtension(outputPath, ".wavelet.exr"), waveletImage);        
         SaveEXR(ReplaceExtension(outputPath, ".compressed.exr"), decodedImage);
 
-        std::printf("Completed in %.2fs!\n", wallTime.Get());
+        std::printf("Completed in %.2fs!\n", wallTime.Get());*/
     }
 }
 

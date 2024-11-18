@@ -1,6 +1,6 @@
 #include "LiftingCodec.h"
 
-#include "core/math/wavelets/cuda/LiftingDWT.cuh"
+#include "core/math/wavelets/cuda/LiftingMLP.cuh"
 #include "core/math/wavelets/StaticDWT.h"
 #include "core/math/wavelets/LiftingDWT.h"
 

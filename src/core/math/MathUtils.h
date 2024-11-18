@@ -4,59 +4,71 @@
 #include <cmath>
 #include <cstdint>
 
+#if !defined(__host__) 
+#define __host__
+#endif
+
+#if !defined(__device__) 
+#define __device__
+#endif
+
+#if !defined(__forceinline__) 
+#define __forceinline__ inline
+#endif
+
 namespace Flair
-{
-    constexpr float kPi = 3.141592653589793f;
-    constexpr float kTwoPi = 2 * kPi;
-    constexpr float kFourPi = 4 * kPi;
-    constexpr float kHalfPi = 0.5 * kPi;
-    constexpr float kRoot2 = 1.4142135623730951f;
-    constexpr float kFltMax = std::numeric_limits<float>::max();
-    constexpr float kPhi = 1.6180339887498948f;
-    constexpr float kInvPhi = 1 / kPhi;
-    constexpr float kLog2 = 0.6931471805599453f;
+{   
+    #define kXAxis      Vec3(1, 0, 0)
+    #define kYAxis      Vec3(0, 1, 0)
+    #define kZAxis      Vec3(0, 0, 1)
+    
+    static constexpr float kPi          = 3.141592653589793f;
+    static constexpr float kTwoPi       = 2 * kPi;
+    static constexpr float kFourPi      = 4 * kPi;
+    static constexpr float kHalfPi      = 0.5 * kPi;
+    static constexpr float kRoot2       = 1.4142135623730951f;
+    static constexpr float kFltMax      = std::numeric_limits<float>::max();
+    static constexpr float kPhi         = 1.6180339887498948f;
+    static constexpr float kInvPhi      = 1 / kPhi;
+    static constexpr float kLog2        = 0.6931471805599453f;
 
-#define kXAxis      Vec3(1, 0, 0)
-#define kYAxis      Vec3(0, 1, 0)
-#define kZAxis      Vec3(0, 0, 1)
+    template<typename T> __forceinline__  __host__ __device__ T  sign(const T f) { return std::copysign(T(1), f); }
 
-    template<typename T> inline T sign(const T f) { return std::copysign(T(1), f); }
-
-    inline float toRad(float deg) { return kTwoPi * deg / 360; }
-    inline float toDeg(float rad) { return 360 * rad / kTwoPi; }
-    template<typename T> inline T sqr(const T t) { return t * t; }
-    template<typename T> inline T cub(const T t) { return t * t * t; }
-    template<typename T> inline T pow4(T t) { t *= t; return t * t; }
+    __host__ __device__ __forceinline__ float  __host__ __device__ toRad(float deg) { return kTwoPi * deg / 360; }
+    __host__ __device__ __forceinline__ float  __host__ __device__ toDeg(float rad) { return 360 * rad / kTwoPi; }
+    template<typename T> __host__ __device__ __forceinline__ T sqr(const T t) { return t * t; }
+    template<typename T> __host__ __device__ __forceinline__ T cub(const T t) { return t * t * t; }
+    template<typename T> __host__ __device__ __forceinline__ T pow4(T t) { t *= t; return t * t; }
 
     // Complement modulus. Negative values are wrapped around to become positive values. e.g. -2 % 10 = 8
-    inline int compMod(int a, int b) { return ((a % b) + b) % b; }
+    __host__ __device__ __forceinline__ int compMod(int a, int b) { return ((a % b) + b) % b; }
 
     // Heaviside step function
-    inline float heaviside(const float edge, const float t) { return float(t > edge); }
+    __host__ __device__ __forceinline__ float heaviside(const float edge, const float t) { return float(t > edge); }
 
     // Clamp value in the range [a, b]
-    template<typename T> T clamp(const T v, const T a, const T b) { return ((v < a) ? a : ((v > b) ? b : v)); }
+    template<typename T> __host__ __device__ __forceinline__ T clamp(const T v, const T a, const T b) { return ((v < a) ? a : ((v > b) ? b : v)); }
 
     // Clamp value in the range [0, 1]
-    inline float saturate(const float v) { return clamp(v, 0.f, 1.f); }
+    __host__ __device__ __forceinline__ float saturate(const float v) { return clamp(v, 0.f, 1.f); }
 
     // Return the fractional component of a f
-    inline float fract(const float f) { return std::fmod(f, 1.0f); }
+    __host__ __device__ __forceinline__ float fract(const float f) { return std::fmod(f, 1.0f); }
 
     // Lerp between a and b with parameter t
     template<typename T, typename S>
-    inline S mix(const S& a, const S& b, const T& t) { return a * (1 - t) + b * t; }
+    __host__ __device__ __forceinline__ S mix(const S& a, const S& b, const T& t) { return a * (1 - t) + b * t; }
 
     template<typename T, typename S>
-    inline S smoothstep(const S& a, const S& b, const T& t) { return mix(a, b, t * t * (3 - 2 * t)); }
+    __host__ __device__ __forceinline__ S smoothstep(const S& a, const S& b, const T& t) { return mix(a, b, t * t * (3 - 2 * t)); }
 
-    inline float smoothstep(const float& t) { return mix(0.f, 1.f, t); }
+    __host__ __device__ __forceinline__ float smoothstep(const float& t) { return mix(0.f, 1.f, t); }
 
     // Maps t in the range [0, 1] onto a cosine curve
-    inline float trigInterpolate(const float t) { return std::cos(t * kPi + kPi) * 0.5f + 0.5f; }
+    __host__ __device__ __forceinline__ float trigInterpolate(const float t) { return std::cos(t * kPi + kPi) * 0.5f + 0.5f; }
 
     // Maps t in the range [0, 1] onto a cosine curve with an exponential fall-off towards the extrema
-    inline float trigInterpolateExp(const float t, const float ex)
+    __host__ __device__ __forceinline__ float trigInterpolateExp(const float t, const float ex)
     {
         float s = std::abs(t * 2 - 1);
         s = std::sin(std::pow(s, ex) * kHalfPi);
@@ -64,7 +76,7 @@ namespace Flair
     }
 
     // Maps t in the range [0, 1] onto a sigmoid curve with slope defined by sigma
-    inline float sigmoidInterpolate(const float t, const float sigma)
+    __host__ __device__ __forceinline__ float sigmoidInterpolate(const float t, const float sigma)
     {
         const float residue = 1 / (1 + std::exp(-sigma));
         float f = 1 / (1 + std::exp(-(t * 2 - 1) * sigma));
@@ -72,7 +84,7 @@ namespace Flair
     }
 
     // FNV1a hash of an array of bytes
-    inline uint32_t HashOf(const char* data, const size_t numBytes)
+    __host__ __device__ __forceinline__ uint32_t HashOf(const char* data, const size_t numBytes)
     {
         uint32_t hash = 0x811c9dc5u;
         for (int i = 0; i < numBytes; ++i)
@@ -83,7 +95,7 @@ namespace Flair
     }
 
     // Mix and combine two hashes
-    inline uint32_t HashCombine(const uint32_t a, const uint32_t b)
+    __host__ __device__ __forceinline__ uint32_t HashCombine(const uint32_t a, const uint32_t b)
     {
         return (((a << (31u - (b & 31u))) | (a >> (b & 31u)))) ^
             ((b << (a & 31u)) | (b >> (31u - (a & 31u))));
