@@ -1,7 +1,8 @@
 #pragma once
 
 #include "core/image/Image.h"
-#include "core/utils/cuda/ManagedObject.cuh"
+#include "core/utils/cuda/MirroredObject.cuh"
+#include "core/utils/cuda/MirroredVector.cuh"
 #include "core/utils/cuda/RandomDistribution.cuh"
 #include "core/math/MathUtils.h"
 #include "core/utils/cuda/NN.cuh"
@@ -11,11 +12,13 @@ namespace Flair
     namespace NN
     {
         // The number of weight matrices (equal to hidden layers - 1)
-        static constexpr uint32_t kDepth = 3;
+        static constexpr int kDepth = 3;
 
         // The width of the network (number nodes)
-        static constexpr uint32_t kWidth = 4;
- 
+        static constexpr int kWidth = 4;
+         
+        // The size of the mini batch
+        static constexpr int kMiniBatchSize = 64; 
 
         using Model = MLP<kWidth, kDepth>;
         using Sample = Tensor1D<kWidth>;

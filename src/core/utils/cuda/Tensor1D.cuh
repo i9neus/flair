@@ -60,7 +60,7 @@ namespace Flair
 
         __forceinline__ __device__ void ZeroGrad() 
         { 
-            if (kKernelIdx < N) { grad[kKernelIdx] = 0; }
+            if (kThreadIdx < N) { grad[kThreadIdx] = 0; }
         }
 
         __forceinline__ __host__ __device__ float& operator[](const int idx) { return data[idx]; }

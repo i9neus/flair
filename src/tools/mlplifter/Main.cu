@@ -80,8 +80,14 @@ int main(int argc, char* argv[])
     try
     {
         IsOk(cudaSetDevice(0));
+
+        cudaDeviceProp prop;
+        IsOk(cudaGetDeviceProperties(&prop, 0));
+
+        std::printf("Shared memory per block: %i\n", prop.sharedMemPerBlock);
+        std::printf("Multiprocessor count: %i\n", prop.multiProcessorCount);
         
-        Flair::Run(argc, argv);
+        //Flair::Run(argc, argv);
     }
     catch (const std::runtime_error& err)
     {

@@ -21,7 +21,8 @@ add_executable(mlplifter
     src/core/utils/cuda/Tensor1D.cuh
     src/core/utils/cuda/NN.cuh
     src/core/utils/cuda/RandomDistribution.cuh
-    src/core/utils/cuda/ManagedObject.cuh
+    src/core/utils/cuda/MirroredObject.cuh
+    src/core/utils/cuda/MirroredVector.cuh
     src/tests/cuda/TensorTests.cu
     src/tests/cuda/TensorTests.cuh
     src/core/Includes.h

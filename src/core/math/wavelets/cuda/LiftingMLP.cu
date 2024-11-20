@@ -11,12 +11,14 @@ namespace Flair
         NN::Sample* targetVec = nullptr;
         NN::Sample* outputVec = nullptr;
         NN::Optimiser* optimiser = nullptr;
+        int* sampleIdxs = nullptr;
+        int batchSize = 0;
         float* loss = nullptr;
     };
 
-    struct IterateCtx
+    struct TrainingCtx
     {
-        __host__ __device__ IterateCtx() {}
+        __host__ __device__ TrainingCtx() {}
         
         NN::Model                mlp;                        // The model weights, biases and gradients
         Tensor1D<NN::kWidth>     input;                      // The input sample for this eval
@@ -30,17 +32,32 @@ namespace Flair
         union
         {
             float                   scratch2D[NN::kWidth][NN::kWidth];    // Scratch memory for accumulating values during tensor multiplication
-            float                   scratch1D[NN::kWidth * NN::kWidth];    // Scratch memory for accumulating values during tensor multiplication
+            float                   scratch1D[NN::kWidth * NN::kWidth];   
         };
+        float loss;
     };
 
-    struct StepCtx
+    struct InferenceCtx
     {
-        NN::Optimiser optimiser;
+        NN::Model               mlp;                       
+        Tensor1D<NN::kWidth>    state;                 
+        float                   scratch2D[NN::kWidth][NN::kWidth];    
     };
 
-    __inline__ __device__ void Forward(IterateCtx& ctx)
+    template<typename CtxType>
+    __forceinline__ __device__ CacheActivations(CtxType&) { }
+
+    template<>
+    __forceinline__ __device__ CacheActivations(TrainingCtx& ctx)
     {
+        ctx.acts[layerIdx][kThreadIdx] = ctx.state[kThreadIdx];
+    }
+
+    template<typename CtxType>
+    __inline__ __device__ void Forward(CtxType& ctx)
+    {
+        _syncthreads();
+        
         for (int layerIdx = 0; layerIdx < NN::kDepth; ++layerIdx)
         {
             // Multiply the state by the layer weights
@@ -61,12 +78,12 @@ namespace Flair
                 }
 
                 // Cache the feed-forward intermediate activations in this layer for use during backprop
-                ctx.acts[layerIdx][kThreadIdx] = ctx.state[kThreadIdx];
+                CacheActivations(ctx);
             }
         }
     }
 
-    __inline__ __device__ void Backward(IterateCtx& ctx)
+    __inline__ __device__ void Backward(TrainingCtx& ctx)
     {
         // Row -> source neuron. Col -> destination neuron.
         const int rowIdx = threadIdx.x / NN::kWidth, colIdx = threadIdx.x % NN::kWidth;
@@ -83,10 +100,10 @@ namespace Flair
             // Accumulate derivative of the weights...
             __syncthreads();
             auto& layer = ctx.mlp.layers[layerIdx];
-            layer.w.grad[colIdx][rowIdx] = ctx.error[colIdx] * ((layerIdx == 0) ? ctx.input[rowIdx] : ctx.acts[layerIdx - 1][rowIdx]);
+            layer.w.grad[colIdx][rowIdx] += ctx.error[colIdx] * ((layerIdx == 0) ? ctx.input[rowIdx] : ctx.acts[layerIdx - 1][rowIdx]);
             if (rowIdx == 0)
             {
-                layer.b.grad[colIdx] = ctx.error[colIdx];
+                layer.b.grad[colIdx] += ctx.error[colIdx];
             }
 
             if (layerIdx != 0)
@@ -97,7 +114,7 @@ namespace Flair
         }
     }
 
-    __inline__ __device__ float L1(IterateCtx& ctx)
+    __inline__ __device__ float L1(TrainingCtx& ctx)
     {
         // L1 loss
         __syncthreads();
@@ -130,50 +147,93 @@ namespace Flair
         return ctx.scratch1D[0];
     }
 
-    // Zeroes network gradients. 
-    // NOTE: We assume each block has the same number of threads as kWidth^2
-    __global__ void ZeroGrad(KernelData kernelData)
+    __global__ void EstimateGradients(KernelData kernelData)
     {
-        kernelData.mlp[kBlockIdx / NN::kDepth].layers[kBlockIdx % NN::kDepth].ZeroGrad();
-    }
+        __shared__ TrainingCtx ctx;
 
-    __global__ void Iterate(KernelData kernelData)
-    {
-        __shared__ IterateCtx ctx;
-
-        // Copy MLP data out of global memory into shared memory
-        if (kThreadIdx == 0)
+        // Copy MLP data out of global memory into shared memory. 
+        // NOTE: the data are pulled from the first copy in the mini-batch which serves as the master network for gradient descent
+        for (int layerIdx = 0; layerIdx < NN::kDepth; ++layerIdx)
         {
-            CudaAssertDebug(kernelData.mlp);
-            CudaAssertDebug(kernelData.targetVec);
-            CudaAssertDebug(kernelData.inputVec);
-
-            ctx.mlp = kernelData.mlp[blockIdx.x];
-            ctx.target = kernelData.targetVec[blockIdx.x];
-            ctx.state = ctx.input = kernelData.inputVec[blockIdx.x];
+            ctx.mlp.layers[layerIdx].w.rawGrad[kThreadIdx] = kernelData.mlp[0].layers[layerIdx].w.rawGrad[kThreadIdx];
+            if (kThreadIdx < NN::kWidth)
+            {
+                ctx.mlp.layers[layerIdx].b.grad[kThreadIdx] = kernelData.mlp[0].layers[layerIdx].b.grad[kThreadIdx];
+            }
         }
+
+        ctx.mlp.ZeroGrad();
+        ctx.loss = 0;
 
         __syncthreads();
 
-        // Feed forward pass
-        Forward(ctx);
+        int numSamples = 0;
+        for (int sampleIdx = kBlockIdx; sampleIdx < batchSize; sampleIdx += NN::kMiniBatchSize, ++numSamples)
+        {
+            // Copy input/target samples into memory
+            if (kThreadIdx == 0)
+            {
+                const int indirect = kernelData.sampleIdxs[sampleIdx];
+                ctx.state = ctx.input = kernelData.inputVec[indirect];
+                ctx.target = kernelData.targetVec[indirect];
+            }
+            
+            // Feed forward pass
+            Forward<true>(ctx);
 
-        kernelData.outputVec[blockIdx.x] = ctx.state;
+            // Calculate the loss and error for the last layer
+            ctx.loss += L1(ctx);
 
-        // Calculate the loss and error for the last layer
-        kernelData.loss[blockIdx.x] = L1(ctx);
+            // Back propagate error and accumulate gradients
+            Backward(ctx);           
+        }
 
-        // Back propagate error and accumulate gradients
-        Backward(ctx);
-
-        // Copy the updated gradients back to global memory                
+        // Copy the mean of the accumulated gradients back into global memory                
         __syncthreads();
         for (int layerIdx = 0; layerIdx < NN::kDepth; ++layerIdx)
         {
-            kernelData.mlp[blockIdx.x].layers[layerIdx].w.rawGrad[kThreadIdx] = ctx.mlp.layers[layerIdx].w.rawGrad[kThreadIdx];
+            kernelData.mlp[kBlockIdx].layers[layerIdx].w.rawGrad[kThreadIdx] = ctx.mlp.layers[layerIdx].w.rawGrad[kThreadIdx] / numSamples;
             if (kThreadIdx < NN::kWidth)
             {
-                kernelData.mlp[blockIdx.x].layers[layerIdx].b.grad[kThreadIdx] = ctx.mlp.layers[layerIdx].b.grad[kThreadIdx];
+                kernelData.mlp[kBlockIdx].layers[layerIdx].b.grad[kThreadIdx] = ctx.mlp.layers[layerIdx].b.grad[kThreadIdx] / numSamples;
+            }
+        }
+
+        if(kKernelIdx 
+        kernelData.loss[kBlockIdx]
+    }
+
+    __global__ void ReduceGradients(KernelData kernelData, const bool span, const int stride)
+    {
+        if (kBlockIdx * (stride + 1) >= NN::kMiniBatchSize) { return; }
+        
+        // Reduce the MLP gradients
+        auto& thisNet = kernelData.mlp[kBlockIdx * stride];
+        const auto& otherNet = kernelData.mlp[kBlockIdx * (stride + 1)];
+        for (int layerIdx = 0; layerIdx < NN::kDepth; ++layerIdx)
+        {
+            thisNet.w.rawGrad[kThreadIdx] += otherNet.w.rawGrad[kThreadIdx];
+            if (kThreadIdx < kWidth)
+            {
+                thisNet.b.grad[kThreadIdx] += otherNet.w.grad[kThreadIdx];
+            }
+        }
+
+        // Reduce the accumulated loss
+        kernelData[kBlockIdx * stride].loss += kernelData[kBlockIdx * (stride + 1)].loss;
+
+        __syncthreads();            
+
+        // On the last reduce, average the accumulated gradients
+        if (span == NN::kMiniBatchSize >> 1)
+        {
+            for (int layerIdx = 0; layerIdx < NN::kDepth; ++layerIdx)
+            {
+                thisNet.w.rawGrad[kThreadIdx] /= NN::kMiniBatchSize;
+                if (kThreadIdx < kWidth)
+                {
+                    thisNet.w.grad[kThreadIdx] /= NN::kMiniBatchSize;
+                }
             }
         }
     }
@@ -185,19 +245,15 @@ namespace Flair
         constexpr float kBeta2 = 0.999;
         constexpr float kEpsilon = 1e-8;
 
-        CudaAssert(mo2 >= 0);
-
         // Compute biased moments
         mo1 = kBeta1 * mo1 + (1 - kBeta1) * grad;
         mo2 = fmaxf(0.f, kBeta2 * mo2 + (1 - kBeta2) * (grad * grad));
 
-        CudaAssert(mo2 >= 0);
-
-        // Update the parameter
+        // Update the parameters
         param -= kAlpha * (mo1 / (1 - kBeta1)) / (sqrtf(mo2 / (1 - kBeta2)) + kEpsilon);
     }
 
-    __global__ void Step(KernelData kernelData)
+    __global__ void Descend(KernelData kernelData)
     {
         auto& mlpLayer = kernelData.mlp[0].layers[kBlockIdx];
         auto& adamLayer = kernelData.optimiser->layers[kBlockIdx];
@@ -236,19 +292,23 @@ namespace Flair
     }
 
     void LiftingMLP::Test()
-    {
+    {        
         RunTensorTests();
         printf_green("Tests passed!\n");
+
+        constexpr int kBatchSize = 1024;
         
         //NN::Ones rng;
         UniformDistribution rng(0, 1, 10);
         //NormalDistribution rng(0.1f, 1.0f, 10);
-        Cuda::HostDeviceObject<NN::Model> deviceModel;
-        Cuda::HostDeviceObject<NN::Optimiser> deviceOptimiser;
-        Cuda::HostDeviceObject<float> deviceLoss;
-        Cuda::HostDeviceObject<NN::Sample> deviceInput;
-        Cuda::HostDeviceObject<NN::Sample> deviceOutput;
-        Cuda::HostDeviceObject<NN::Sample> deviceTarget = NN::Sample({ 0.f, 0.0f, 1.f, 1.0f});
+        Cuda::MirroredObject<NN::Model> deviceModel;
+        Cuda::MirroredObject<NN::Optimiser> deviceOptimiser;
+        Cuda::MirroredObject<float> deviceLoss;
+        Cuda::MirroredObject<NN::Sample> deviceInput;
+        Cuda::MirroredObject<NN::Sample> deviceOutput;
+        Cuda::MirroredObject<NN::Sample> deviceTarget = NN::Sample({ 0.f, 0.0f, 1.f, 1.0f});
+
+        Cuda::MirroredVector<
         
         deviceModel->Initialise(rng);
         deviceInput->Initialise(rng);
@@ -268,19 +328,26 @@ namespace Flair
         HighResTimer timer;
         for (int epochIdx = 0; epochIdx < kNumEpochs; ++epochIdx)
         {
-            // Forward-back propagate
-            constexpr int kThreadsPerIterateBlock = NN::kWidth * NN::kWidth;
-            Iterate << <1, kThreadsPerIterateBlock >> > (kernelData);
-            IsOk(cudaDeviceSynchronize());
+            // Estimate the gradients
+            constexpr int kThreadsPerEstimateBlock = NN::kWidth * NN::kWidth;
+            EstimateGradients << <NN::kMiniBatchSize, kThreadsPerEstimateBlock >> > (kernelData);
+
+            // Reduce gradients
+            for (int span = NN::kMiniBatchSize >> 1, stride = 2; span >= 2; span >>= 1, stride <<= 1)
+            {
+                ReduceGradients << <span, kThreadsPerEstimateBlock >> > (kernelData, span, stride);
+            }
 
             // Optimiser step
-            constexpr int kThreadsPerStepBlock = NN::kWidth * (NN::kWidth + 1);
-            Step << <NN::kDepth, kThreadsPerStepBlock >> > (kernelData);
+            constexpr int kNumStepThreads = NN::kWidth * (NN::kWidth + 1);
+            constexpr int kNumStepBlocks = NN::kDepth;
+            Descend << < kNumStepBlocks, kNumStepThreads >> > (kernelData);
+            
             IsOk(cudaDeviceSynchronize());
 
             //if (timer.Get() > 0.5 || epochIdx % 100 == 0)
             {
-                deviceLoss.Download();
+                /*deviceLoss.Download();
                 std::printf("\n************************************************\n%i: Loss: %.10f\n", epochIdx, *deviceLoss);
                 timer.Reset();
 
@@ -289,7 +356,7 @@ namespace Flair
 
                 deviceOutput.Download();
                 deviceModel.Download();
-                deviceOptimiser.Download();
+                deviceOptimiser.Download();*/
 
                 /*for (int layerIdx = 0; layerIdx < NN::kDepth; ++layerIdx)
                 {
