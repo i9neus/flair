@@ -1,4 +1,4 @@
-/*#include "core/io/ImageIO.h"
+#include "core/io/ImageIO.h"
 #include "core/io/FilesystemUtils.h"
 #include "core/math/MathUtils.h"
 #include "core/utils/HighResTimer.h"
@@ -7,20 +7,15 @@
 
 #include <unordered_map>
 
-#include "LiftingCodec.h"*/
-#include "core\math\wavelets\cuda\LiftingMLP.cuh"
-
+#include "LiftingCodec.cuh"
+//#include "core\math\wavelets\cuda\LiftingMLP.cuh"
+//#include "tests/cuda/TensorTests.cuh"
 
 namespace Flair
 {
     void Run(int argc, char* argv[])
-    {
-        LiftingMLP liftingMLP;
-        liftingMLP.Test();
-
-        return;
-        
-        /*if (argc < 3)
+    {        
+        if (argc < 3)
         {
             std::printf("Usage: exr2flair [input (.exr)] [output (.exr)]\n");
             std::printf("  Params:\n"
@@ -71,7 +66,7 @@ namespace Flair
         SaveEXR(ReplaceExtension(outputPath, ".wavelet.exr"), waveletImage);        
         SaveEXR(ReplaceExtension(outputPath, ".compressed.exr"), decodedImage);
 
-        std::printf("Completed in %.2fs!\n", wallTime.Get());*/
+        std::printf("Completed in %.2fs!\n", wallTime.Get());
     }
 }
 
@@ -79,15 +74,15 @@ int main(int argc, char* argv[])
 {
     try
     {
-        IsOk(cudaSetDevice(0));
+        /*IsOk(cudaSetDevice(0));
 
         cudaDeviceProp prop;
         IsOk(cudaGetDeviceProperties(&prop, 0));
 
         std::printf("Shared memory per block: %i\n", prop.sharedMemPerBlock);
-        std::printf("Multiprocessor count: %i\n", prop.multiProcessorCount);
+        std::printf("Multiprocessor count: %i\n", prop.multiProcessorCount);*/
         
-        //Flair::Run(argc, argv);
+        Flair::Run(argc, argv);
     }
     catch (const std::runtime_error& err)
     {

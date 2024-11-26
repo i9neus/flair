@@ -1,9 +1,9 @@
 ﻿#pragma once
 
-#include "../../Includes.h"
+#include "core/Includes.h"
 
 template<typename Wavelet, typename Real, int K0, int K1>
-class Wavelet1D
+class Wavelet1
 {
 private:
 	static constexpr int B0 = -K1 / 2;

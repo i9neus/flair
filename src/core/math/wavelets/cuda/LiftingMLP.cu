@@ -1,6 +1,7 @@
 #include "LiftingMLP.cuh"
 #include "tests/cuda/TensorTests.cuh"
 #include "core/utils/HighResTimer.h"
+#include "core/utils/cuda/TensorOps.cuh"
 
 namespace Flair
 {      
@@ -17,7 +18,7 @@ namespace Flair
     };
 
     struct TrainingCtx
-    {
+    {   
         __host__ __device__ TrainingCtx() {}
         
         NN::Model                mlp;                        // The model weights, biases and gradients
@@ -35,6 +36,7 @@ namespace Flair
             float                   scratch1D[NN::kWidth * NN::kWidth];   
         };
         float loss;
+        int batchSize;
     };
 
     struct InferenceCtx
@@ -45,10 +47,10 @@ namespace Flair
     };
 
     template<typename CtxType>
-    __forceinline__ __device__ CacheActivations(CtxType&) { }
+    __forceinline__ __device__ void CacheActivations(const int, CtxType&) { }
 
     template<>
-    __forceinline__ __device__ CacheActivations(TrainingCtx& ctx)
+    __forceinline__ __device__ void CacheActivations(const int layerIdx, TrainingCtx& ctx)
     {
         ctx.acts[layerIdx][kThreadIdx] = ctx.state[kThreadIdx];
     }
@@ -56,12 +58,12 @@ namespace Flair
     template<typename CtxType>
     __inline__ __device__ void Forward(CtxType& ctx)
     {
-        _syncthreads();
+        __syncthreads();
         
         for (int layerIdx = 0; layerIdx < NN::kDepth; ++layerIdx)
         {
             // Multiply the state by the layer weights
-            Mul<false>(ctx.mlp.layers[layerIdx].w, ctx.state, ctx.scratch2D);
+            Mul(ctx.mlp.layers[layerIdx].w, ctx.state, ctx.state, ctx.scratch2D);
 
             if (kThreadIdx < NN::kWidth)
             {
@@ -78,14 +80,14 @@ namespace Flair
                 }
 
                 // Cache the feed-forward intermediate activations in this layer for use during backprop
-                CacheActivations(ctx);
+                CacheActivations(layerIdx, ctx);
             }
         }
     }
 
     __inline__ __device__ void Backward(TrainingCtx& ctx)
     {
-        // Row -> source neuron. Col -> destination neuron.
+        // Row -> source neuron. Col -> destination neuron.1
         const int rowIdx = threadIdx.x / NN::kWidth, colIdx = threadIdx.x % NN::kWidth;
 
         for (int layerIdx = NN::kDepth - 1; layerIdx >= 0; --layerIdx)
@@ -109,7 +111,7 @@ namespace Flair
             if (layerIdx != 0)
             {
                 // Multiply the error by the transpose of the weight matrix 
-                Mul<true>(ctx.mlp.layers[layerIdx].w, ctx.error, ctx.scratch2D);
+                MulT(ctx.mlp.layers[layerIdx].w, ctx.error, ctx.error, ctx.scratch2D);
             }
         }
     }
@@ -163,12 +165,17 @@ namespace Flair
         }
 
         ctx.mlp.ZeroGrad();
-        ctx.loss = 0;
+
+        if (kThreadIdx == 0)
+        {
+            ctx.loss = 0;
+            ctx.batchSize = kernelData.batchSize;
+        }
 
         __syncthreads();
 
         int numSamples = 0;
-        for (int sampleIdx = kBlockIdx; sampleIdx < batchSize; sampleIdx += NN::kMiniBatchSize, ++numSamples)
+        for (int sampleIdx = kBlockIdx; sampleIdx < ctx.batchSize; sampleIdx += NN::kMiniBatchSize, ++numSamples)
         {
             // Copy input/target samples into memory
             if (kThreadIdx == 0)
@@ -179,7 +186,7 @@ namespace Flair
             }
             
             // Feed forward pass
-            Forward<true>(ctx);
+            Forward(ctx);
 
             // Calculate the loss and error for the last layer
             ctx.loss += L1(ctx);
@@ -199,8 +206,8 @@ namespace Flair
             }
         }
 
-        if(kKernelIdx 
-        kernelData.loss[kBlockIdx]
+        //if(kKernelIdx 
+        //kernelData.loss[kBlockIdx]
     }
 
     __global__ void ReduceGradients(KernelData kernelData, const bool span, const int stride)
@@ -212,15 +219,15 @@ namespace Flair
         const auto& otherNet = kernelData.mlp[kBlockIdx * (stride + 1)];
         for (int layerIdx = 0; layerIdx < NN::kDepth; ++layerIdx)
         {
-            thisNet.w.rawGrad[kThreadIdx] += otherNet.w.rawGrad[kThreadIdx];
-            if (kThreadIdx < kWidth)
+            thisNet.layers[layerIdx].w.rawGrad[kThreadIdx] += otherNet.layers[layerIdx].w.rawGrad[kThreadIdx];
+            if (kThreadIdx < NN::kWidth)
             {
-                thisNet.b.grad[kThreadIdx] += otherNet.w.grad[kThreadIdx];
+                thisNet.layers[layerIdx].b.grad[kThreadIdx] += otherNet.layers[layerIdx].b.grad[kThreadIdx];
             }
         }
 
         // Reduce the accumulated loss
-        kernelData[kBlockIdx * stride].loss += kernelData[kBlockIdx * (stride + 1)].loss;
+        kernelData.loss[kBlockIdx * stride] += kernelData.loss[kBlockIdx * (stride + 1)];
 
         __syncthreads();            
 
@@ -229,10 +236,10 @@ namespace Flair
         {
             for (int layerIdx = 0; layerIdx < NN::kDepth; ++layerIdx)
             {
-                thisNet.w.rawGrad[kThreadIdx] /= NN::kMiniBatchSize;
-                if (kThreadIdx < kWidth)
+                thisNet.layers[layerIdx].w.rawGrad[kThreadIdx] /= NN::kMiniBatchSize;
+                if (kThreadIdx < NN::kWidth)
                 {
-                    thisNet.w.grad[kThreadIdx] /= NN::kMiniBatchSize;
+                    thisNet.layers[layerIdx].b.grad[kThreadIdx] /= NN::kMiniBatchSize;
                 }
             }
         }
@@ -293,8 +300,7 @@ namespace Flair
 
     void LiftingMLP::Test()
     {        
-        RunTensorTests();
-        printf_green("Tests passed!\n");
+        RunTensorTests(false);
 
         constexpr int kBatchSize = 1024;
         
@@ -308,7 +314,9 @@ namespace Flair
         Cuda::MirroredObject<NN::Sample> deviceOutput;
         Cuda::MirroredObject<NN::Sample> deviceTarget = NN::Sample({ 0.f, 0.0f, 1.f, 1.0f});
 
-        Cuda::MirroredVector<
+        // Allocate vectors for the samples
+        Cuda::MirroredVector<float> deviceSamples(kBatchSize * NN::kWidth);
+        Cuda::MirroredVector<int> deviceIndirect(kBatchSize);
         
         deviceModel->Initialise(rng);
         deviceInput->Initialise(rng);

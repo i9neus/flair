@@ -10,15 +10,13 @@ namespace Flair
     {
         // Fully-connected layer
         template<int Width>
-        class Linear
+        struct Linear
         {
-        public: 
-            Tensor2D<Width, Width>   w;  // Weights
-            Tensor1D<Width>          b;  // Biases
+        public:
+            Tensor2D<Width, Width, true>   w;  // Weights
+            Tensor1D<Width, true>          b;  // Biases
 
         public:
-            Linear() = default;
-
             __inline__ __host__ __device__ void ZeroGrad()
             {
                 w.ZeroGrad();
@@ -27,27 +25,27 @@ namespace Flair
         };
 
         template<int Width, int Depth>
-        class MLP
+        struct SequentialLayers
         {
         public:
             Linear<Width> layers[Depth];       // Fully-connected layer weights and biases
 
         public:
-            MLP() = default;
-
             template<typename RNG>
             __host__ void Initialise(RNG& rng)
             {
-                for (int layerIdx = 0; layerIdx < kDepth; ++layerIdx)
+                for (int layerIdx = 0; layerIdx < Depth; ++layerIdx)
                 {
                     layers[layerIdx].w.Initialise(rng);
                     layers[layerIdx].b.Initialise(rng);
                 }
+
+                ZeroGrad();
             }
 
             __inline__ __host__ __device__ void ZeroGrad()
             {
-                for (int layerIdx = 0; layerIdx < kDepth; ++layerIdx)
+                for (int layerIdx = 0; layerIdx < Depth; ++layerIdx)
                 {
                     layers[layerIdx].ZeroGrad();
                 }

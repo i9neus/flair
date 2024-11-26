@@ -32,7 +32,7 @@ namespace Flair
 		
 		template<typename T> inline void Write(const std::vector<T>& vec) { this->operator<<(vec); }		
 
-		virtual const size_t Size() const = 0;
+		virtual size_t Size() const = 0;
 		virtual void Flush() {}
 
 	private:
@@ -55,7 +55,7 @@ namespace Flair
 	{
 	public:
 		const std::vector<uint8_t>& Data() const { return m_data; }
-		virtual const size_t Size() const override final { return m_data.size(); }
+		virtual size_t Size() const override final { return m_data.size(); }
 
 	protected:
 		virtual void WriteData(const void* data, const size_t dataSize) override final
@@ -89,7 +89,7 @@ namespace Flair
 			m_file.close();
 		}
 
-		virtual const size_t Size() const override final { return m_bytesWritten; }
+		virtual size_t Size() const override final { return m_bytesWritten; }
 		virtual void Flush() override final { m_file.flush(); }
 
 	protected:

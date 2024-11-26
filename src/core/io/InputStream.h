@@ -62,7 +62,7 @@ namespace Flair
 		template<typename T> inline InputStream& operator>>(T& data) { ReadData(&data, sizeof(T)); return *this; }
 
 		const uint8_t* Data() const { return m_data; }
-		const size_t Size() const { return m_dataSize; }
+		size_t Size() const { return m_dataSize; }
 
 	private:
 		inline void ReadData(void* data, const size_t dataSize)

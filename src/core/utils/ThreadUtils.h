@@ -1,7 +1,8 @@
 #pragma once
 
+#if !defined(FLAIR_DISABLE_MULTITHREADING)
 #include <thread>
-#include <atomic>
+#endif
 #include <vector>
 #include <functional>
 
@@ -26,11 +27,24 @@ namespace Flair
 		};
 
 	public:
-		Threaded(const int numThreads, const int pollInterval = 10) : m_ctxs(numThreads), m_pollInterval(std::max(1, pollInterval))
-		{	}
+		using Functor = std::function<void(Ctx&, int, int)>;
 
-		template<typename Lambda>
-		void Initialise(Lambda onInit)
+	public:
+		Threaded(const int maxThreads = 16)
+		{
+#if !defined(FLAIR_DISABLE_MULTITHREADING)
+			int numThreads = std::max(1, int(std::thread::hardware_concurrency()));
+			if (maxThreads > 0)
+			{
+				numThreads = std::min(maxThreads, numThreads);
+			}
+			m_ctxs.resize(numThreads);
+#else
+			m_ctxs.resize(1);
+#endif
+		}
+
+		void Initialise(Functor onInit)
 		{
 			for (int i = 0; i < m_ctxs.size(); ++i)
 			{
@@ -38,33 +52,27 @@ namespace Flair
 			}
 		}
 
-		template<typename Lambda>
-		void Run(Lambda onExecute)
-		{
-			m_activeCount.store(m_ctxs.size());
+#if !defined(FLAIR_DISABLE_MULTITHREADING)
+
+		void Run(Functor onExecute)
+		{			
 			for (int i = 0; i < m_ctxs.size(); ++i)
 			{
-				std::function<void(Ctx&)> fn = onExecute;
-				m_threads.emplace_back(&Threaded<Ctx>::RunImpl, this, onExecute, std::ref(m_ctxs[i]));
-				m_threads.back().detach();
+				m_threads.emplace_back(&Threaded<Ctx>::RunThread, this, onExecute, std::ref(m_ctxs[i]), i);
 			}
 
-			// Wait for everything to finish
-			while (m_activeCount.load() > 0)
-			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(m_pollInterval));
-			}
+			// Wait for all the workers to finish
+			for (int i = 0; i < m_ctxs.size(); ++i) { m_threads[i].join(); }
 		}
-
-		template<typename Lambda>
-		void RunSerial(Lambda onExecute)
+#else
+		void RunSerial(Functor onExecute)
 		{
-			m_activeCount.store(m_ctxs.size());
 			for (int i = 0; i < m_ctxs.size(); ++i)
 			{
-				RunImpl(onExecute, m_ctxs[i]);
+				RunThread(onExecute, m_ctxs[i], 0);
 			}
 		}
+#endif
 
 		// Iterators
 		inline Iterator begin() { return Iterator(m_ctxs.begin()); }
@@ -73,16 +81,15 @@ namespace Flair
 		std::vector<Ctx>& GetContexts() { return m_ctxs; }
 
 	private:
-		void RunImpl(std::function<void(Ctx&)> onExecute, Ctx& ctx)
+		void RunThread(Functor onExecute, Ctx& ctx, int threadIdx)
 		{
-			onExecute(ctx);
-			m_activeCount.fetch_sub(1);
+			onExecute(ctx, threadIdx, m_ctxs.size());
 		}
 
 	private:
 		std::vector<Ctx> m_ctxs;
+#if !defined(FLAIR_DISABLE_MULTITHREADING)
 		std::vector<std::thread> m_threads;
-		std::atomic<int> m_activeCount;
-		int m_pollInterval;
+#endif
 	};
 }

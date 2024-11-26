@@ -2,7 +2,8 @@
 
 #include "math/Hilbert2D.h"
 #include "math/Hash.h"
-#include "math/wavelets/NormalisedDWT.h"
+#include "math/wavelets/1d/NormalisedDWT1.h"
+#include "math/wavelets/2d/StaticDWT2.h"
 #include "core/math/MathUtils.h"
 #include "coders/RLECoder.h"
 #include "image/Operators.h"
@@ -136,9 +137,11 @@ namespace Flair
     // Encodes a single image channel into a compressed bitstream stored in decompData
     void Codec::EncodeChannel(Image1f& chnlData, Image1f* waveletData, const int chnlIdx, CompressedChannelData& decompData)
     {
-        // In-place transform the image using the DCT
-        NormalisedDWT<CDF97<float>> dwt(m_width, m_params.dwtFlags);
-        dwt.Forward(chnlData.Vector(), decompData.dwtPassNorms);
+        // Decompose the channel data using the discrete wavelet transform
+        //NormalisedDWT1<CDF97<float>> dwt(m_width, m_params.dwtFlags);
+        //dwt.Forward(chnlData.Vector(), decompData.dwtPassNorms);
+        StaticDWT2<float> dwt(m_width);
+        dwt.Forward(chnlData.Vector());
 
         // Store the uncompressed precinct data
         decompData.header.minCompressedPrecinct = m_params.minCompressedPrecinct;
@@ -210,7 +213,7 @@ namespace Flair
                                         auto& g = (*waveletData)[pixelIdx];
                                         g = (float(quant) - rate) / rate;
                                         g = std::abs(g);
-                                        //g = std::abs(chnlData[pixelIdx]);//     <--- Output unquantised wavelet coefficients
+                                        g = std::abs(chnlData[pixelIdx]);//     <--- Output unquantised wavelet coefficients
                                         g = std::pow(g, 2.2f);
                                     }
                                 }
@@ -356,9 +359,11 @@ namespace Flair
             }
         }
 
-        // In-place inverse transform the image using the DCT
-        NormalisedDWT<CDF97<float>> dwt(m_width, m_params.dwtFlags);
-        dwt.Inverse(chnlData.Vector(), decompData.dwtPassNorms);
+        // Invert the wavelet transform of the decoded coefficients
+        //NormalisedDWT1<CDF97<float>> dwt(m_width, m_params.dwtFlags);
+        //dwt.Inverse(chnlData.Vector(), decompData.dwtPassNorms);
+        StaticDWT2<float> dwt(m_width);
+        dwt.Inverse(chnlData.Vector());
 
         return chnlData;
     }
@@ -430,7 +435,34 @@ namespace Flair
 #endif
     }
 
-    /*void Codec::DecodeWaveletCoeffs(const Image3f& waveletCoeffs, Image3f& outputImage) const
+    //using DiagnosticWavelet = StaticDWT1<CDF97<float>>;
+    using DiagnosticWavelet = StaticDWT2<float>;
+
+    void Codec::EncodeWaveletCoeffs(const Image3f& inputImage, Image3f& waveletCoeffs) const
+    {
+        waveletCoeffs.Resize(inputImage);
+        Image3f remappedImage = inputImage;
+
+        // Transform the image to gamma-corrected space
+        remappedImage.ApplyGamma(1. / 2.2);
+
+        // Transform into YUV colour space
+        remappedImage.RGBToYUV();
+
+        // Encode the image channel by channel
+        Image1f chnlData(remappedImage.Width(), remappedImage.Height());
+        for (int chnlIdx = 0; chnlIdx < 3; ++chnlIdx)
+        {
+            Image1f chnlData = remappedImage.ExtractChannel(chnlIdx);
+
+            DiagnosticWavelet dwt(m_width);
+            dwt.Forward(chnlData.Vector());
+
+            waveletCoeffs.EmplaceChannel(chnlData, chnlIdx);
+        }
+    }
+
+    void Codec::DecodeWaveletCoeffs(const Image3f& waveletCoeffs, Image3f& outputImage) const
     {
         outputImage.Resize(waveletCoeffs);
         
@@ -438,10 +470,10 @@ namespace Flair
         Image1f chnlData(waveletCoeffs.Width(), waveletCoeffs.Height());
         for (int chnlIdx = 0; chnlIdx < 3; ++chnlIdx)
         {
-            waveletCoeffs.ExtractChannel(chnlData, chnlIdx);
+            Image1f chnlData = waveletCoeffs.ExtractChannel(chnlIdx);
 
-            // In-place inverse transform the image using the DCT
-            DWT<CDF97<float>>::Inverse(chnlData.Vector(), m_width, m_normaliseCoeffs);
+            DiagnosticWavelet dwt(m_width);
+            dwt.Inverse(chnlData.Vector());
             
             outputImage.EmplaceChannel(chnlData, chnlIdx);
         }
@@ -450,8 +482,8 @@ namespace Flair
         outputImage.YUVToRGB();
 
         // Transform the image to gamma-corrected space
-        outputImage.ApplyGamma(m_params.gamma);
-    }*/
+        outputImage.ApplyGamma(2.2);
+    }
 
     void Codec::Decode(const CompressedImageData& compImage, Image3f& outputImage)
     {

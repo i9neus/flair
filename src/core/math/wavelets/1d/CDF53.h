@@ -1,10 +1,10 @@
 ﻿#pragma once
 
-#include "Wavelet.h"
+#include "Wavelet1.h"
 
 // Cohen–Daubechies–Feauveau 5/3 windowed wavelet
 template<typename Real>
-class CDF53 : public Wavelet1D<CDF53<Real>, Real, -2, 3>
+class CDF53 : public Wavelet1<CDF53<Real>, Real, -2, 3>
 {
 public:
 	CDF53() = delete;

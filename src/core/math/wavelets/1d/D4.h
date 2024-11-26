@@ -1,10 +1,10 @@
 ﻿#pragma once
 
-#include "Wavelet.h"
+#include "Wavelet1.h"
 
 // Daubechies 4-tap wavelet
 template<typename Real>
-class D4 : public Wavelet1D<D4<Real>, Real, -1, 2>
+class D4 : public Wavelet1<D4<Real>, Real, -1, 2>
 {
 public:
 	D4() = delete;

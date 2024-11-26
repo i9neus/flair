@@ -3,7 +3,7 @@
 #include "CompressedImageData.h"
 #include "image/Image.h"
 #include "coders/ArithmeticCoder.h"
-#include "math/wavelets/NormalisedDWT.h"
+#include "math/wavelets/1d/NormalisedDWT1.h"
 
 namespace Flair
 {
@@ -47,7 +47,8 @@ namespace Flair
 		void      			Encode(const Image3f& inputImage, CompressedImageData& decomposed);
 		void				Decode(const CompressedImageData& decomposed, Image3f& outputImage);
 
-		//void				DecodeWaveletCoeffs(const Image3f& waveletCoeffs, Image3f& outputImage) const;
+		void				EncodeWaveletCoeffs(const Image3f& inputImage, Image3f& waveletCoeffs) const;
+		void				DecodeWaveletCoeffs(const Image3f& waveletCoeffs, Image3f& outputImage) const;
 		const Image3f&		GetWaveletData() const { return m_waveletCoeffs; }
 
 		const Params&       GetEncoderParams() const { return m_params; }
@@ -59,6 +60,10 @@ namespace Flair
 
 		void				EncodeChannel(Image1f& chnlData, Image1f* waveletData, const int chnlIdx, CompressedChannelData& decompData);
 		Image1f				DecodeChannel(const CompressedChannelData& decompData, const int chnlIdx);
+
+		void				ForwardDWT(Image1f& chnlData) const;
+		void				InverseDWT(Image1f& chnlData) const;
+
 
 		inline float		GetPrecinctThreshold(const int precinctIdx, const CoderModelType rate) const;
 

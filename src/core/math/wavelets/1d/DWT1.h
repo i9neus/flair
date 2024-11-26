@@ -1,15 +1,15 @@
 ﻿#pragma once
 
-#include "../MathUtils.h"
+#include "core/math/MathUtils.h"
 
 namespace Flair
 {
 	/*
-	*  Discrete wavelet transform parameterised by PrimaryWavelet mother/father pair.
+	*  Separable 2D discrete wavelet transform parameterised by PrimaryWavelet mother/father pair.
 	* */
 
 	template<typename Real>
-	class DWT
+	class DWT1
 	{
 	protected:
 		std::vector<Real> m_lineInputData;
@@ -37,13 +37,13 @@ namespace Flair
 			int passSize = m_blockSize >> (m_numPasses - 1);
 			for (int passIdx = m_numPasses - 1; passIdx >= 0; passIdx--, passSize *= 2)
 			{
-				if(passIdx == 0)
-					InverseTransform(inputData, passIdx, passSize);
+				//if(passIdx == 0)
+				InverseTransform(inputData, passIdx, passSize);
 			}
 		}
 
 	protected:
-		DWT(const int blockSize)
+		DWT1(const int blockSize)
 		{
 			// Allocate temporary storage that can be reused accross successive transforms
 			m_blockSize = blockSize;
@@ -138,7 +138,7 @@ namespace Flair
 
 		void ValidateInput(std::vector<Real>& inputData)
 		{
-			AssertMsg(m_blockSize > 0, "DWT was not initialised with Prepare().");
+			AssertMsg(m_blockSize > 0, "DWT1 was not initialised with Prepare().");
 			AssertFmt(inputData.size() >= sqr(m_blockSize), "Input data of size %zi is not large enough for block size of %i.", inputData.size(), m_blockSize);
 		}
 	};

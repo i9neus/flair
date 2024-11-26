@@ -36,7 +36,7 @@ namespace Flair
         AssertMsg(exrWidth > 0 && exrHeight > 0 && exrDataIn, "tinyexr returned invalid values");
 
         image.Resize(exrWidth, exrHeight);
-        image.Populate([&](const int x, const int y, float* pixel)
+        image.ParallelMap([&](const int x, const int y, const int, float* pixel)
             {
                 for (int c = 0; c < Channels; ++c)
                 {

@@ -1,13 +1,13 @@
 ﻿#pragma once
 
-#include "Wavelet.h"
+#include "Wavelet1.h"
 
 // Haar wavelet
 template<typename Real>
-class Haar : public Wavelet1D<Haar<Real>, Real, 0, 1>
+class Haar1 : public Wavelet1<Haar1<Real>, Real, 0, 1>
 {
 public:
-	Haar() = delete;
+	Haar1() = delete;
 
 	using kType = Real;
 	static constexpr int kSize = 2;

@@ -1,15 +1,15 @@
 #pragma once
 
-#include "core/math/wavelets/DWT.h"
+#include "DWT1.h"
 
 namespace Flair
 {
 	// 2D discrete wavelet transform made up of separate 1D transforms
 	template<typename Real>
-	class LiftingDWT : public DWT<Real>
+	class LiftingDWT1 : public DWT1<Real>
 	{
 	private:
-		using Base = DWT<Real>;
+		using Base = DWT1<Real>;
 
 	protected:
 		virtual void ForwardTransform1D(const int passIdx, const int passSize) override final
@@ -33,6 +33,6 @@ namespace Flair
 		}
 
 	public:
-		LiftingDWT(const int blockSize) : Base(blockSize) {}
+		LiftingDWT1(const int blockSize) : Base(blockSize) {}
 	};
 }

@@ -43,7 +43,7 @@ namespace Flair
         if (outputExt != ".flair") { std::printf("Output file must either be .flair"); return; }
 
         const bool verbose = (params.find("verbose") != params.end());
-        const bool diagnostics = (params.find("diagnostics") != params.end());     
+        const bool diagnostics = (params.find("diagnostics") != params.end());
 
         // Load the image. For now it's just .exrs.
         std::printf("Loading '%s'...\n", inputPath.c_str());
@@ -61,12 +61,12 @@ namespace Flair
         // Encode the image
         HighResTimer wallTime;
         Flair::Image3f outputImage;
-        Flair::CompressedImageData compressedImage;
-        codec.Encode(inputImage, compressedImage);
+        Flair::CompressedImageData compressedData;
+        codec.Encode(inputImage, compressedData);
 
         // Serialise the compressed image
         Flair::OutputFileStream outStream(outputPath);
-        compressedImage.Serialise(outStream);
+        compressedData.Serialise(outStream);
         outStream.Close();
         printf_green("Compressed Flair image in %.2fs!\n", wallTime.Get());
 
@@ -77,19 +77,25 @@ namespace Flair
             // Load in the file we've just written out
             wallTime.Reset();
             Flair::InputStream inStream(outputPath);
-            compressedImage = Flair::CompressedImageData(inStream);
+            compressedData = Flair::CompressedImageData(inStream);
 
             // Decode the compressed file
-            codec.Decode(compressedImage, outputImage);
+            codec.Decode(compressedData, outputImage);
             printf_yellow("Decompressed Flair image in %.2fs!\n", wallTime.Get());
 
             // Generate and print some stats
-            const auto stats = GenerateCodecStats(outputImage, inputImage, compressedImage);
+            const auto stats = GenerateCodecStats(outputImage, inputImage, compressedData);
             Flair::PrintStats(stats);
 
             std::printf("Exporting additional data...\n");
             SaveEXR(ReplaceExtension(outputPath, ".wavelet.exr"), codec.GetWaveletData());
-            SaveEXR(ReplaceExtension(outputPath, ".compressed.exr"), outputImage);
+            SaveEXR(ReplaceExtension(outputPath, ".compressed.wavelet.exr"), outputImage);
+
+            Flair::Image3f waveletCoeffs;
+            codec.EncodeWaveletCoeffs(inputImage, waveletCoeffs);
+            //codec.DecodeWaveletCoeffs(waveletCoeffs, outputImage);
+            SaveEXR(ReplaceExtension(outputPath, ".compressed.exr"), outputImage);    
+            SaveEXR(ReplaceExtension(outputPath, ".wavelet.exr"), codec.GetWaveletData());
 
             std::printf("Diagnostic checks complete!\n");
         }

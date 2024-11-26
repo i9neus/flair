@@ -4,5 +4,5 @@
 
 namespace Flair
 {
-    __host__ void RunTensorTests();
+    __host__ void RunTensorTests(const bool verbose);
 }

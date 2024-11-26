@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/utils/cuda/CudaUtils.cuh"
+#include "CudaUtils.cuh"
 #include "core/utils/ConsoleUtils.h"
 
 namespace Flair
@@ -8,7 +8,7 @@ namespace Flair
     namespace Cuda
     {
         template<typename Type>
-        class MirroredObject
+        class Object
         {
         private:
             Type  m_hostData;
@@ -16,21 +16,21 @@ namespace Flair
 
         public:
             template<typename... Pack>
-            __host__ MirroredObject(Pack... pack) : 
-                MirroredObject()
+            __host__ Object(Pack... pack) : 
+                Object()
             {
                 m_hostData = Type(pack...);
                 Upload();
             }
 
-            __host__ MirroredObject()
+            __host__ Object()
             {
                 IsOk(cudaMalloc((void**)&cu_deviceData, sizeof(Type)));
                 Assert(cu_deviceData);
                 //printf_green("Allocated %i bytes of device data.\n", sizeof(Type));
             }
 
-            __host__ ~MirroredObject()
+            __host__ ~Object()
             {
                 cudaFree(cu_deviceData);
                 //printf_green("Released %i bytes of device data.\n", sizeof(Type));
@@ -43,7 +43,7 @@ namespace Flair
             __host__ inline Type& operator*() { return m_hostData; }
             __host__ inline const Type& operator*() const { return m_hostData; }
 
-            __host__ MirroredObject& operator=(const Type& hostCopy)
+            __host__ Object& operator=(const Type& hostCopy)
             {
                 m_hostData = hostCopy;
                 Upload();

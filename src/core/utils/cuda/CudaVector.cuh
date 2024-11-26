@@ -1,38 +1,53 @@
 #pragma once
 
-#include "core/utils/cuda/CudaUtils.cuh"
+#include "CudaUtils.cuh"
 #include "core/utils/ConsoleUtils.h"
 
 namespace Flair
 {
     namespace Cuda
-    {
-        enum MirroredVectorFlags : uint32_t { kVectorExactMemory = 1 };
-        
+    {        
         template<typename Type>
-        class MirroredVector
+        class Vector
         {
         private:
             Type*               m_hostData;
             size_t              m_capacity;
             size_t              m_size;
             Type*               cu_deviceData;
-            uint32_t            m_flags;
+
+        public:
+            template<typename ItType>
+            class Iterator
+            {
+                friend class Vector;
+                Type* m_mem;
+                size_t m_idx;
+
+            private:
+                Iterator(Type* mem, const int idx) : m_mem(mem), m_idx(idx) {}
+
+            public:
+                __device__ __forceinline__ Iterator& operator++() { ++m_idx; return *this; }
+                __device__ __forceinline__ Iterator& operator--() { --m_m_idx; return *this; }
+                __device__ __forceinline__ bool operator!=(const Iterator& other) const { return m_idx != other.m_idx; }
+                __device__ __forceinline__ ItType& operator*() { return m_mem[m_idx]; }
+                __device__ __forceinline__ ItType* operator->() { return &m_mem[idx]; }
+            };
 
         public:           
-            __host__ MirroredVector(const uint32_t flags = 0) :
+            __host__ Vector() :
                 m_hostData(nullptr),
                 m_capacity(0),
                 m_size(0),
-                cu_deviceData(0),
-                m_flags(flags) {}
+                cu_deviceData(0){}
 
-            __host__ MirroredVector(const size_t size) : MirroredVector(0)
+            __host__ Vector(const size_t size) : Vector()
             {
-                Resize(size, false);
+                Resize(size, true);
             }
             
-            __host__ MirroredVector(const size_t size, Type initVal) : MirroredVector(0)
+            __host__ Vector(const size_t size, Type initVal) : Vector(0)
             {
                 Resize(size, false);
                 for (int i = 0; i < m_size; ++i) { m_hostData[i] = initVal; }
@@ -70,7 +85,7 @@ namespace Flair
                 }
             }
 
-            __host__ ~MirroredVector()
+            __host__ ~Vector()
             {
                 if (cu_deviceData) { cudaFree(cu_deviceData); }
                 if (m_hostData) { delete[] m_hostData; }
@@ -78,8 +93,8 @@ namespace Flair
 
             __host__ Type* GetDeviceData() { return cu_deviceData; }       
 
-            inline Type& operator[](const int idx) { return m_data[idx]; }
-            inline const Type& operator[](const int idx) const { return m_data[idx]; }
+            inline Type& operator[](const int idx) { return m_hostData[idx]; }
+            inline const Type& operator[](const int idx) const { return m_hostData[idx]; }
             __host__ inline size_t Size() const { return m_size; }
 
             __inline__ __host__ void Download()
@@ -91,6 +106,11 @@ namespace Flair
             {
                 IsOk(cudaMemcpy(cu_deviceData, &m_hostData, sizeof(Type), cudaMemcpyHostToDevice));
             }
+
+            __host__ __forceinline__ Iterator<Type> begin() { return Iterator<Type>(m_hostData, 0); }
+            __host__ __forceinline__ Iterator<const Type> begin() const { return Iterator<const Type>(m_hostData, 0); }
+            __host__ __forceinline__ Iterator<Type> end() { return Iterator<Type>(m_hostData, m_size); }
+            __host__ __forceinline__ Iterator<const Type> end() const { return Iterator<const Type>(m_hostData, m_size); }
         };
     }
 }

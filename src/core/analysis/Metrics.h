@@ -77,7 +77,7 @@ namespace Flair
         const float kEpsilon1 = sqr(0.01 * 1e-3f), kEpsilon2 = sqr(0.03 * 1e-3f);
         const int width = referenceImage.Width(), height = referenceImage.Height();
         int numPatches = 0;
-        for (int j = 0, imgIdx = 0; j < referenceImage.Height() / patchStride; ++j)
+        for (int j = 0; j < referenceImage.Height() / patchStride; ++j)
         {
             for (int i = 0; i < referenceImage.Width() / patchStride; ++i)
             {

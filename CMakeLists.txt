@@ -14,25 +14,26 @@ enable_language(CUDA)
 
 add_executable(mlplifter
     src/tools/mlplifter/Main.cu
-    #src/tools/mlplifter/LiftingCodec.cpp
-    #src/tools/mlplifter/LiftingCodec.h
-    src/core/utils/cuda/CudaUtils.cuh
-    src/core/utils/cuda/Tensor2D.cuh
-    src/core/utils/cuda/Tensor1D.cuh
-    src/core/utils/cuda/NN.cuh
-    src/core/utils/cuda/RandomDistribution.cuh
-    src/core/utils/cuda/MirroredObject.cuh
-    src/core/utils/cuda/MirroredVector.cuh
-    src/tests/cuda/TensorTests.cu
-    src/tests/cuda/TensorTests.cuh
+    src/tools/mlplifter/LiftingCodec.cu
+    src/tools/mlplifter/LiftingCodec.cuh   
+    src/core/nn/TensorOps.cuh
+    src/core/nn/Tensor2D.cuh
+    src/core/nn/Tensor1D.cuh
+    src/core/nn/ContinuousRandomVariable.cuh
+    src/core/nn/Modules.cuh
+    src/core/nn/DataLoader.cuh
+    src/core/nn/MLP/MLP.cu
+    src/core/nn/MLP/MLP.cuh
+    src/core/nn/MLP/MLPKernels.cuh
     src/core/Includes.h
-    #src/core/io/ImageIO.cpp
-    #src/core/io/ImageIO.h
+    src/core/io/ImageIO.cpp
+    src/core/io/ImageIO.h
     src/core/io/FilesystemUtils.h
     src/core/math/MathUtils.h
-    src/core/math/wavelets/cuda/LiftingMLP.cu
-    src/core/math/wavelets/cuda/LiftingMLP.cuh
-    src/core/math/wavelets/LiftingDWT.h
+    src/core/math/wavelets/1d/LiftingDWT1.h
+    src/core/math/wavelets/2d/StaticDWT2.h
+    src/tests/cuda/TensorTests.cuh
+    src/tests/cuda/TensorTests.cu
 )
 
 target_compile_features(mlplifter PUBLIC cxx_std_17)

@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "StaticDWT.h"
+#include "StaticDWT1.h"
 
 namespace Flair
 {
@@ -13,18 +13,18 @@ namespace Flair
 
 	// 2D discrete wavelet transform made up of separate 1D transforms
 	template<typename PrimaryWavelet>
-	class NormalisedDWT : public StaticDWT<PrimaryWavelet>
+	class NormalisedDWT1 : public StaticDWT1<PrimaryWavelet>
 	{
 	public:
 		using Real = typename PrimaryWavelet::kType;
 		static constexpr int kNormKernelSize = 0;
 
 	private:
-		using Base = StaticDWT<PrimaryWavelet>;
+		using Base = StaticDWT1<PrimaryWavelet>;
 		uint32_t m_flags;
 
 	public:
-		NormalisedDWT(const int blockSize, const uint32_t flags) : Base(blockSize)
+		NormalisedDWT1(const int blockSize, const uint32_t flags) : Base(blockSize)
 		{
 			m_flags = flags;
 		}

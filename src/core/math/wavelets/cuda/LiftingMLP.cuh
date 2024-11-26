@@ -33,9 +33,9 @@ namespace Flair
         //const Image1f&          m_inputImage;
         std::vector<float>      m_modelWeights;
 
-        Cuda::HostDeviceObject<NN::Model> m_deviceModel;
-        Cuda::HostDeviceObject<NN::Sample> m_deviceSample;
-        Cuda::HostDeviceObject<NN::Sample> m_deviceTarget;
+        Cuda::MirroredObject<NN::Model> m_deviceModel;
+        Cuda::MirroredObject<NN::Sample> m_deviceSample;
+        Cuda::MirroredObject<NN::Sample> m_deviceTarget;
 
     public:
         LiftingMLP();
