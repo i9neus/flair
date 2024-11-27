@@ -38,7 +38,7 @@ namespace Flair
             MLP();
 
             void Initialise();
-            void Train(const DataLoader& data);
+            void Train(const DataLoader<Tensor1D<kWidth, false>>& data);
         };
     }  
 }

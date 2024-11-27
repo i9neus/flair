@@ -50,9 +50,9 @@ namespace Flair
         constexpr float kErrorThreshold = 1e-6;
         constexpr int N = 4;
         
-        Cuda::Object<Tensor2D<N, N, false>> X;
-        Cuda::Object<Tensor1D<N, false>> v;
-        Cuda::Object<Tensor1D<N, false>> r;
+        Cuda::Object<Tensor2D<N, N, false>, kCudaMemMirrored> X;
+        Cuda::Object<Tensor1D<N, false>, kCudaMemMirrored> v;
+        Cuda::Object<Tensor1D<N, false>, kCudaMemMirrored> r;
 
         // NOTE: Row-major order constuctor
         X = Tensor2D<N, N, false>({ {0.652467807974029, 0.633070356251368, 0.68281308686666, 0.566351831093323},
@@ -86,9 +86,9 @@ namespace Flair
         constexpr float kErrorThreshold = 1e-6;
         constexpr int N = 7, M = 3;
 
-        Cuda::Object<Tensor2D<N, M, false>> X;
-        Cuda::Object<Tensor1D<N, false>> v, rw;
-        Cuda::Object<Tensor1D<M, false>> w, rv;
+        Cuda::Object<Tensor2D<N, M, false>, kCudaMemMirrored> X;
+        Cuda::Object<Tensor1D<N, false>, kCudaMemMirrored> v, rw;
+        Cuda::Object<Tensor1D<M, false>, kCudaMemMirrored> w, rv;
 
         // NOTE: Row-major order constuctor
         X = Tensor2D<N, M, false>({ {0.817389490171071, 0.111419611131236, 0.789525994633852, 0.187803146706026, 0.24136096745765, 0.0657387595087811, 0.542246620509624},

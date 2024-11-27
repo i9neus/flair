@@ -32,8 +32,8 @@ namespace Flair
     }*/
 
     // Matrix multiply of an NxM tensor with K-tensor. 
-    template<bool Transpose, int N, int M, int V, int W, bool HasGrad>
-    __forceinline__ __device__ void MulImpl(const Tensor2D<N, M, HasGrad>& m, const Tensor1D<V, HasGrad>& v, Tensor1D<W, HasGrad>& w, float(&scratch)[N][M])
+    template<bool Transpose, int N, int M, int V, int W, bool HasGradM, bool HasGradV, bool HasGradW>
+    __forceinline__ __device__ void MulImpl(const Tensor2D<N, M, HasGradM>& m, const Tensor1D<V, HasGradV>& v, Tensor1D<W, HasGradW>& w, float(&scratch)[N][M])
     {        
         // Block must have have at least as many threads as the tensor has elements
         CudaAssertDebug(blockDim.x >= N * M);
@@ -77,14 +77,14 @@ namespace Flair
         }
     }
 
-    template<int N, int M, int V, int W, bool HasGrad>
-    __forceinline__ __device__ void MulT(const Tensor2D<N, M, HasGrad>& m, const Tensor1D<V, HasGrad>& v, Tensor1D<W, HasGrad>& w, float(&scratch)[N][M])
+    template<int N, int M, bool HasGradM, bool HasGradV, bool HasGradW>
+    __forceinline__ __device__ void MulT(const Tensor2D<N, M, HasGradM>& m, const Tensor1D<M, HasGradV>& v, Tensor1D<N, HasGradW>& w, float(&scratch)[N][M])
     {
         MulImpl<true>(m, v, w, scratch);
     }
 
-    template<int N, int M, int V, int W, bool HasGrad>
-    __forceinline__ __device__ void Mul(const Tensor2D<N, M, HasGrad>& m, const Tensor1D<V, HasGrad>& v, Tensor1D<W, HasGrad>& w, float(&scratch)[N][M])
+    template<int N, int M, bool HasGradM, bool HasGradV, bool HasGradW>
+    __forceinline__ __device__ void Mul(const Tensor2D<N, M, HasGradM>& m, const Tensor1D<N, HasGradV>& v, Tensor1D<M, HasGradW>& w, float(&scratch)[N][M])
     {
         MulImpl<false>(m, v, w, scratch);
     }

@@ -7,11 +7,9 @@
 #if !defined(__host__) 
 #define __host__
 #endif
-
 #if !defined(__device__) 
 #define __device__
 #endif
-
 #if !defined(__forceinline__) 
 #define __forceinline__ inline
 #endif
@@ -99,6 +97,25 @@ namespace Flair
     {
         return (((a << (31u - (b & 31u))) | (a >> (b & 31u)))) ^
             ((b << (a & 31u)) | (b >> (31u - (a & 31u))));
+    }
+
+    // Reverse bits of 32-bit integer
+    __host__ __device__ __forceinline__ uint32_t RadicalInverse(uint32_t i)
+    {
+        i = ((i & 0xffffu) << 16u) | (i >> 16u);
+        i = ((i & 0x00ff00ffu) << 8u) | ((i & 0xff00ff00u) >> 8u);
+        i = ((i & 0x0f0f0f0fu) << 4u) | ((i & 0xf0f0f0f0u) >> 4u);
+        i = ((i & 0x33333333u) << 2u) | ((i & 0xccccccccu) >> 2u);
+        i = ((i & 0x55555555u) << 1u) | ((i & 0xaaaaaaaau) >> 1u);
+        return i;
+    }
+
+    template<typename T>
+    __host__ __device__ __forceinline__ void Swap(T& a, T& b)
+    {
+        const T s = a;
+        a = b;
+        b = s;
     }
 
 }

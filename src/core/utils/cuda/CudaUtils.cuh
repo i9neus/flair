@@ -103,3 +103,5 @@ __host__ inline void CudaHostAssert(T result, char const* const func, const char
             CudaAssert(object); \
             object->FunctionName(); \
         }
+
+enum ContainerFlags : int { kCudaMemDevice = 1, kCudaMemMirrored = 2 };

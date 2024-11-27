@@ -2,11 +2,9 @@
 #include "tests/cuda/TensorTests.cuh"
 #include "core/utils/HighResTimer.h"
 #include "../ContinuousRandomVariable.cuh"
+#include "../Indirection.cuh"
 #include "MLPKernels.cuh"
 #include "../Modules.cuh"
-
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
 
 namespace Flair
 {
@@ -19,49 +17,52 @@ namespace Flair
 
         void MLP::Initialise()
         {
-        }
+        }        
 
-        void MLP::Train(const DataLoader& dataset)
+        void MLP::Train(const DataLoader<Tensor1D<MLP::kWidth, false>>& dataset)
         {
             // Define the model policy
             using Policy = MLPPolicy<kWidth, kDepth, kMiniBatchSize>;
             
             RunTensorTests(false);
 
-            /*UniformDistribution rng(0, 1, 10);
-            Cuda::Vector<Model> deviceModels(kMiniBatchSize);
-            Cuda::Object<Optimiser> deviceOptimiser;
-            Cuda::Vector<Sample> deviceInputSamples(dataset.Size());
-            Cuda::Vector<Sample> deviceTargetSamples(dataset.Size());
+            UniformDistribution rng(0, 1, 10);
+            Cuda::Vector<MiniBatchData<Policy>, kCudaMemMirrored> deviceMiniBatch(kMiniBatchSize);
+            Cuda::Object<float, kCudaMemMirrored> deviceLoss;
+            Cuda::Object<Optimiser, kCudaMemMirrored> deviceOptimiser;
+            Cuda::Vector<Sample, kCudaMemDevice> deviceInputSamples(dataset.Size());
+            Cuda::Vector<Sample, kCudaMemDevice> deviceTargetSamples(dataset.Size());
 
-            // Initialise the mini-batch and optimiser
-            for (int i = 0; i < deviceModels.Size(); ++i)
+            // Determininstically initialise the mini-batch weights and the optimiser 
+            for (int i = 0; i < deviceMiniBatch.Size(); ++i)
             {
-                deviceModels[i].Initialise(UniformDistribution(0, 1, std::hash<int>{}(i)));
+                deviceMiniBatch[i].mlp.Initialise(UniformDistribution(0, 1, std::hash<int>{}(0)));
             }
-            deviceOptimiser->Initialise(Zeros());  
-
-            
-
-
-            deviceModels.Upload();
+            deviceOptimiser->Initialise(Zeros());           
+            deviceMiniBatch.Upload();
             deviceOptimiser.Upload();
-            deviceInput.Upload();
 
-           
+            // Upload the samples
+            auto [inputSamples, targetSamples] = dataset.Data();   
+            deviceInputSamples = *inputSamples;
+            deviceTargetSamples = *targetSamples;           
+
+            // Create random indirection buffer
+            Indirection sampleIdxs(dataset.Size());
+            sampleIdxs.Randomise();
 
             KernelData<Policy> kernelData;
-            kernelData.mlp = deviceModel.GetDeviceData();
-            kernelData.inputVec = deviceInput.GetDeviceData();
-            kernelData.outputVec = deviceOutput.GetDeviceData();
-            kernelData.targetVec = deviceTarget.GetDeviceData();
-            kernelData.loss = deviceLoss.GetDeviceData();
+            kernelData.miniBatch = deviceMiniBatch.GetDeviceData();
+            kernelData.inputVecs = deviceInputSamples.GetDeviceData();
+            kernelData.targetVecs = deviceTargetSamples.GetDeviceData();
             kernelData.optimiser = deviceOptimiser.GetDeviceData();
+            kernelData.sampleIdxs = sampleIdxs->GetDeviceData();
+            kernelData.loss = deviceLoss.GetDeviceData();
 
-            constexpr int kNumEpochs = 1000;
+            constexpr int kNumEpochs = 1;
             HighResTimer timer;
             for (int epochIdx = 0; epochIdx < kNumEpochs; ++epochIdx)
-            {
+            {                                
                 // Estimate the gradients
                 EstimateGradients(kernelData);
 
@@ -74,10 +75,13 @@ namespace Flair
                 // Optimiser step
                 Descend(kernelData);
 
-                IsOk(cudaDeviceSynchronize());
+                deviceLoss.Download();
+                printf("Epoch %i: L1 = %.10f\n", epochIdx, *deviceLoss);
 
-                
-            }*/
+                sampleIdxs.Shuffle();
+
+                IsOk(cudaDeviceSynchronize());                
+            }
         }
     }
 }

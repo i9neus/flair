@@ -7,10 +7,9 @@
 
 namespace Flair
 {
-	class MLPDataset : public NN::DataLoader
+	class MLPDataset : public NN::DataLoader<Tensor1D<16, false>>
 	{
 	public:
-		using Sample = std::array<float, 16>;
 		using SampleList = std::vector<Sample>;
 
 		std::vector<Sample> inputSamples;
@@ -20,16 +19,11 @@ namespace Flair
 		__host__ MLPDataset() = default;
 
 		__host__ virtual size_t Size() const override final { return inputSamples.size(); }
-		
-		__host__ virtual std::pair<float*, float*> operator[](const int idx) override final
-		{
-			return { inputSamples[idx].data(), targetSamples[idx].data() };
-		}
 
-		__host__ virtual std::pair<const float*, const float*> Data() const override final 
+		__host__ virtual std::pair<const std::vector<Sample>*, const std::vector<Sample>*> Data() const override final
 		{ 
 			 Assert(!inputSamples.empty() && !targetSamples.empty()); 
-			 return { inputSamples.front().data(), targetSamples.front().data() };
+			 return { &inputSamples, &targetSamples };
 		}
 	};
 	

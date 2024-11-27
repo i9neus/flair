@@ -1,8 +1,6 @@
 #pragma once
 
-#include "core/utils/cuda/CudaUtils.cuh"
-#include "core/utils/ConsoleUtils.h"
-#include "thirdparty/tinyformat/tinyformat.h"
+#include "NNUtils.cuh"
 
 namespace Flair
 {
@@ -63,8 +61,11 @@ namespace Flair
 
         __forceinline__ __host__ __device__ float* Data() { return data; }
         __forceinline__ __host__ __device__ const float* Data() const { return data; }
-        __forceinline__ __host__ __device__ float* GradData() { static_assert(HasGrad, "This tensor does not have gradients."); return &data[N]; }
-        __forceinline__ __host__ __device__ const float* GradData() const { static_assert(HasGrad, "This tensor does not have gradients."); return &data[N]; }
+
+        __host__ __forceinline__ TensorIterator<float> begin() { return TensorIterator<float>(data, 0); }
+        __host__ __forceinline__ TensorIterator<const float> begin() const { return TensorIterator<const float>(data, 0); }
+        __host__ __forceinline__ TensorIterator<float> end() { return TensorIterator<float>(data, N); }
+        __host__ __forceinline__ TensorIterator<const float> end() const { return TensorIterator<const float>(data, N); }
 
         __forceinline__ __device__ __host__ Tensor1D& operator+=(const Tensor1D& rhs)
         {

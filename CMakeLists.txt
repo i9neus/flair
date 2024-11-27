@@ -16,10 +16,13 @@ add_executable(mlplifter
     src/tools/mlplifter/Main.cu
     src/tools/mlplifter/LiftingCodec.cu
     src/tools/mlplifter/LiftingCodec.cuh   
+    src/core/utils/cuda/CudaObject.cuh
+    src/core/utils/cuda/CudaVector.cuh
     src/core/nn/TensorOps.cuh
     src/core/nn/Tensor2D.cuh
     src/core/nn/Tensor1D.cuh
     src/core/nn/ContinuousRandomVariable.cuh
+    src/core/nn/Indirection.cuh
     src/core/nn/Modules.cuh
     src/core/nn/DataLoader.cuh
     src/core/nn/MLP/MLP.cu

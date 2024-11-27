@@ -7,14 +7,16 @@ namespace Flair
 {
     namespace NN
     {
+        template<typename SampleT>
         class DataLoader
         {
         public:
+            using Sample = SampleT;
+
             __host__ DataLoader() = default;
 
             __host__ virtual size_t Size() const = 0;
-            __host__ virtual std::pair<float*, float*> operator[](const int idx) = 0;
-            __host__ virtual std::pair<const float*, const float*> Data() const = 0;
+            __host__ virtual std::pair<const std::vector<Sample>*, const std::vector<Sample>*> Data() const = 0;
         };
     }
 }

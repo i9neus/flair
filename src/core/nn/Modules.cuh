@@ -8,13 +8,13 @@ namespace Flair
 {
     namespace NN
     {
-        // Fully-connected layer
-        template<int Width>
+        // Fully-connected layer with weights and biases
+        template<int N>
         struct Linear
         {
         public:
-            Tensor2D<Width, Width, true>   w;  // Weights
-            Tensor1D<Width, true>          b;  // Biases
+            Tensor2D<N, N, true>   w;  
+            Tensor1D<N, true>      b; 
 
         public:
             __inline__ __host__ __device__ void ZeroGrad()

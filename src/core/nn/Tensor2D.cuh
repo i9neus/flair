@@ -67,6 +67,16 @@ namespace Flair
         __forceinline__ __host__ __device__ const float& operator()(const int col, const int row) const { return data[col][row]; }
         __forceinline__ __host__ __device__ float& Grad(const int col, const int row) { static_assert(HasGrad, "This tensor does not have gradients."); return data[N+col][row]; }
         __forceinline__ __host__ __device__ const float& Grad(const int col, const int row) const { static_assert(HasGrad, "This tensor does not have gradients."); return data[N+col][row]; }
+        __forceinline__ __host__ __device__ float& Grad(const int idx) { static_assert(HasGrad, "This tensor does not have gradients."); return rawData[N * M + idx]; }
+        __forceinline__ __host__ __device__ const float& Grad(const int idx) const { static_assert(HasGrad, "This tensor does not have gradients."); return rawData[N * M + idx]; }
+
+        __forceinline__ __host__ __device__ float* Data() { return rawData; }
+        __forceinline__ __host__ __device__ const float* Data() const { return rawData; }
+
+        __host__ __forceinline__ TensorIterator<float> begin() { return TensorIterator<float>(data, 0); }
+        __host__ __forceinline__ TensorIterator<const float> begin() const { return TensorIterator<const float>(data, 0); }
+        __host__ __forceinline__ TensorIterator<float> end() { return TensorIterator<float>(data, N); }
+        __host__ __forceinline__ TensorIterator<const float> end() const { return TensorIterator<const float>(data, N); }
 
         __host__ __device__ Tensor2D Transpose() const
         {
