@@ -50,18 +50,18 @@ namespace Flair
         constexpr float kErrorThreshold = 1e-6;
         constexpr int N = 4;
         
-        Cuda::Object<Tensor2D<N, N, false>, kCudaMemMirrored> X;
-        Cuda::Object<Tensor1D<N, false>, kCudaMemMirrored> v;
-        Cuda::Object<Tensor1D<N, false>, kCudaMemMirrored> r;
+        Cuda::Object<Tensor2D<N, N, false>> X;
+        Cuda::Object<Tensor1D<N, false>> v;
+        Cuda::Object<Tensor1D<N, false>> r;
 
         // NOTE: Row-major order constuctor
-        X = Tensor2D<N, N, false>({ {0.652467807974029, 0.633070356251368, 0.68281308686666, 0.566351831093323},
+        X <<= Tensor2D<N, N, false>({ {0.652467807974029, 0.633070356251368, 0.68281308686666, 0.566351831093323},
                                     {0.935202196659332, 0.976187756902101, 0.238451694824191, 0.637562295790242},
                                     {0.101098380420291, 0.64552469382196, 0.159522225810158, 0.813787851275935},
                                     {0.904785470451441, 0.640712457447006, 0.306539727511699, 0.756197597784415} });
 
         // Input vector
-        v = Tensor1D<N, false>({ 0.876688377753995, 0.019128400638492, 0.542616681289372, 0.352370872609403 });
+        v <<= Tensor1D<N, false>({ 0.876688377753995, 0.019128400638492, 0.542616681289372, 0.352370872609403 });
 
         // Targets for multiply and multiply transpose
         const Tensor1D<N, false> targetMul({ {1.15419222757901}, {1.19260005697745}, {0.474294186123722}, {1.23826628790775} });
@@ -86,18 +86,18 @@ namespace Flair
         constexpr float kErrorThreshold = 1e-6;
         constexpr int N = 7, M = 3;
 
-        Cuda::Object<Tensor2D<N, M, false>, kCudaMemMirrored> X;
-        Cuda::Object<Tensor1D<N, false>, kCudaMemMirrored> v, rw;
-        Cuda::Object<Tensor1D<M, false>, kCudaMemMirrored> w, rv;
+        Cuda::Object<Tensor2D<N, M, false>> X;
+        Cuda::Object<Tensor1D<N, false>> v, rw;
+        Cuda::Object<Tensor1D<M, false>> w, rv;
 
         // NOTE: Row-major order constuctor
-        X = Tensor2D<N, M, false>({ {0.817389490171071, 0.111419611131236, 0.789525994633852, 0.187803146706026, 0.24136096745765, 0.0657387595087811, 0.542246620509624},
+        X <<= Tensor2D<N, M, false>({ {0.817389490171071, 0.111419611131236, 0.789525994633852, 0.187803146706026, 0.24136096745765, 0.0657387595087811, 0.542246620509624},
                                     {0.231154506736027, 0.396006081548587, 0.700473781942245, 0.211825979054127, 0.748656881482948, 0.422850649339949, 0.247494780864008},
                                     {0.977171761740777, 0.825162939488514, 0.925275201178863, 0.578056151994379, 0.292869736797923, 0.208051064780593, 0.580474481294159} });
 
         // Input vector
-        v = Tensor1D<N, false>({ {0.128820834638437}, {0.306427380034618}, {0.712012070075779}, {0.390581871380074}, {0.81996723678518}, {0.325351497995291}, {0.593260227507795} });
-        w = Tensor1D<M, false>({ {0.518774167040164}, {0.16901301687775}, {0.472565143196439} });
+        v <<= Tensor1D<N, false>({ {0.128820834638437}, {0.306427380034618}, {0.712012070075779}, {0.390581871380074}, {0.81996723678518}, {0.325351497995291}, {0.593260227507795} });
+        w <<= Tensor1D<M, false>({ {0.518774167040164}, {0.16901301687775}, {0.472565143196439} });
 
         // Targets for multiply and multiply transpose
         const Tensor1D<M, false> targetMul({ {1.31593300106679}, {1.63088381395845}, {1.91552370181268} });

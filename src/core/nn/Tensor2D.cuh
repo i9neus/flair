@@ -93,7 +93,7 @@ namespace Flair
 
         __host__ __device__ void Print(const bool showGrad = false) const
         {
-            AssertMsg(!showGrad || HasGrad, "Tensor does not have gradients to print");
+            CudaAssertMsg(!showGrad || HasGrad, "Tensor does not have gradients to print");
             printf("{\n");
             for (int rowIdx = 0; rowIdx < M; ++rowIdx)
             {
@@ -109,7 +109,7 @@ namespace Flair
 
         __host__ std::string Format(const bool showGrad = false) const
         {
-            AssertMsg(!showGrad || HasGrad, "Tensor does not have gradients to print");
+            CudaAssertMsg(!showGrad || HasGrad, "Tensor does not have gradients to print");
             std::string str = "{\n";
             for (int rowIdx = 0; rowIdx < M; ++rowIdx)
             {

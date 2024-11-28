@@ -6,6 +6,8 @@
 #include "MLPKernels.cuh"
 #include "../Modules.cuh"
 #include <fstream>
+#include <thread>
+#include <chrono>
 
 namespace Flair
 {
@@ -20,10 +22,15 @@ namespace Flair
         {
         }        
 
-        void MLP::Train(const DataLoader<Tensor1D<MLP::kWidth, false>>& dataset)
+        void MLP::Train(const DataLoader<Tensor1D<16, false>>& dataset)
         {
+            //using Activation = LeakyReLU;
+            using ActivationFunction = Activation::LeakyReLU;
+
+            using LossFunction = Loss::L1;
+            
             // Define the model policy
-            using Policy = MLPPolicy<kWidth, kDepth, kMiniBatchSize>;
+            using Policy = MLPPolicy<kWidth, kDepth, kMiniBatchSize, ActivationFunction, LossFunction>;
             
             RunTensorTests(false);
 
@@ -31,8 +38,8 @@ namespace Flair
 
             UniformDistribution rng(0, 1, 10);
             Cuda::Vector<MiniBatchData<Policy>, kCudaMemMirrored> deviceMiniBatch(kMiniBatchSize);
-            Cuda::Object<float, kCudaMemMirrored> deviceLoss;
-            Cuda::Object<Optimiser, kCudaMemMirrored> deviceOptimiser;
+            Cuda::Object<float> deviceLoss;
+            Cuda::Object<Optimiser> deviceOptimiser;
             Cuda::Vector<Sample, kCudaMemDevice> deviceInputSamples(dataset.Size());
             Cuda::Vector<Sample, kCudaMemDevice> deviceTargetSamples(dataset.Size());
 
@@ -64,26 +71,48 @@ namespace Flair
             std::ofstream file("C:/Unity/SyntheticGS/Assets/HDRI/Loss.dat", std::ios::out);
 
             constexpr int kNumEpochs = 1000;
+            constexpr int kNumMiniBatches = 5000;
+            int miniBatchIdx = 0;
+            float meanLoss;
             HighResTimer timer;
-            for (int epochIdx = 0; epochIdx < kNumEpochs; ++epochIdx)
-            {                                
-                // Estimate the gradients
-                EstimateGradients(kernelData);
+            for (int epochIdx = 0; epochIdx < kNumEpochs && miniBatchIdx < kNumMiniBatches; ++epochIdx)
+            {                                                
+                // Reset the kernel data (loss values, etc.) for the new epoch
+                PrepareNewEpoch(kernelData);
+                
+                for (int sampleIdx = 0; sampleIdx < kernelData.batchSize; sampleIdx += Policy::kMiniBatchSize, ++miniBatchIdx)
+                {
+                    // Estimate the gradients
+                    EstimateGradients(kernelData, sampleIdx);
 
-                // Reduce gradients 
-                ReduceGradients(kernelData);                
+                    // Reduce gradients 
+                    ReduceGradients(kernelData, sampleIdx);
 
-                // Optimiser step
-                Descend(kernelData);
+                    // Optimiser step
+                    Descend(kernelData);
 
-                deviceLoss.Download();
-                if(epochIdx % 100 == 0)
-                    printf("Epoch %i: L1 = %.10f\n", epochIdx, *deviceLoss);
-                file << tfm::format("%i %f ", epochIdx, *deviceLoss);
+                    IsOk(cudaDeviceSynchronize());
 
+                    meanLoss = deviceLoss.Download();// / std::ceil(kernelData.batchSize / float(Policy::kMiniBatchSize));
+                    //printf("Epoch %i: L1 = %.10f\n", epochIdx, meanLoss);
+                    file << tfm::format("%i %f ", miniBatchIdx, meanLoss);
+
+                    //using namespace std::chrono_literals;
+                    //std::this_thread::sleep_for(100ms);
+                }
+
+                // Record the loss
+                //meanLoss = deviceLoss.Download();// / std::ceil(kernelData.batchSize / float(Policy::kMiniBatchSize));
+                if (epochIdx % 100 == 0) 
+                { 
+                    printf("Epoch %i: L1 = %.10f\n", epochIdx, meanLoss); 
+
+                    //deviceMiniBatch.Download();
+                    //deviceMiniBatch[0].mlp.layers[2].w.Print(true);
+                }
+
+                // Shuffle the 
                 sampleIdxs.Shuffle();
-
-                IsOk(cudaDeviceSynchronize());                
             }
         }
     }

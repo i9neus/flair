@@ -131,7 +131,7 @@ namespace Flair
                 ctx.rng = std::uniform_int_distribution<int>();
             });
 
-        constexpr int kNumSamples = 64;
+        constexpr int kNumSamples = 10000;
         std::atomic<int> numSamples(0);
         Threaded<ThreadCtx>::Functor sampleFunctor = [&](ThreadCtx& ctx, int i, int N)
         {
