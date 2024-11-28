@@ -131,7 +131,7 @@ namespace Flair
                 ctx.rng = std::uniform_int_distribution<int>();
             });
 
-        constexpr int kNumSamples = 1000;
+        constexpr int kNumSamples = 64;
         std::atomic<int> numSamples(0);
         Threaded<ThreadCtx>::Functor sampleFunctor = [&](ThreadCtx& ctx, int i, int N)
         {
@@ -177,7 +177,7 @@ namespace Flair
 
                 for (auto& f : ctx.inputSamples[sampleIdx])
                 {
-                    //f = (f - mean) / std::max(1.f, mean);
+                    f = (f - mean) / std::max(1.f, mean);
                 }
             }
         };
@@ -242,10 +242,12 @@ namespace Flair
         NN::MLP mlp;
         mlp.Train(dataset);
 
-        for (int chnlIdx = 0; chnlIdx < 3; ++chnlIdx)
-        {
-            waveletImage.EmplaceChannel(chnlData, chnlIdx);
-        }
+        waveletImage.Erase();
+        waveletImage.ParallelMap([&](const int x, const int y, const int, float* pixel)
+            {
+                const float& c = chnlData.At(x, y)[0];
+                pixel[(c < 0) ? 0 : 1] = std::abs(c);           
+            });        
 
         return waveletImage;
     }

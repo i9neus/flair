@@ -147,7 +147,7 @@ namespace Flair
         }
 
         /**
-        *  Computes the loss from the output and broadcasts it back to the error tensor in the last layer
+        *  Computes the loss from the output and broadcast it back to the error tensor in the last layer
         */
         template<typename Ctx>
         __inline__ __device__ float Loss(Ctx& ctx)
@@ -195,11 +195,11 @@ namespace Flair
             // NOTE: the data are pulled from the first copy in the mini-batch which serves as the master network for gradient descent
             auto& masterMlp = kernelData.miniBatch[0].mlp;
             for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
-            {
-                ctx.mlp.layers[layerIdx].w.Grad(kThreadIdx) = masterMlp.layers[layerIdx].w.Grad(kThreadIdx);
+            {               
+                ctx.mlp.layers[layerIdx].w[kThreadIdx] = masterMlp.layers[layerIdx].w[kThreadIdx];
                 if (kThreadIdx < PolicyT::kWidth)
                 {
-                    ctx.mlp.layers[layerIdx].b.Grad(kThreadIdx) = masterMlp.layers[layerIdx].b.Grad(kThreadIdx);
+                    ctx.mlp.layers[layerIdx].b[kThreadIdx] = masterMlp.layers[layerIdx].b[kThreadIdx];
                 }
             }
 
@@ -231,21 +231,28 @@ namespace Flair
 
                 // Calculate the loss and error for the last layer
                 ctx.loss += Loss(ctx);
+                
+                //printf("%i, %i -> %f\n", kBlockIdx, kThreadIdx, ctx.loss);
 
                 // Back propagate error and accumulate gradients
                 Backward(ctx);
             }
+            numSamples = max(1, numSamples);
 
             // Calculate the mean of the accumulated gradients and copy them back into global memory                
             __syncthreads();
-            auto& batchMlp = kernelData.miniBatch[kBlockIdx].mlp;
+            auto& batchElement = kernelData.miniBatch[kBlockIdx];
             for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
             {
-                batchMlp.layers[layerIdx].w.Grad(kThreadIdx) = ctx.mlp.layers[layerIdx].w.Grad(kThreadIdx) / numSamples;
+                batchElement.mlp.layers[layerIdx].w.Grad(kThreadIdx) = ctx.mlp.layers[layerIdx].w.Grad(kThreadIdx) / numSamples;
                 if (kThreadIdx < PolicyT::kWidth)
                 {
-                    batchMlp.layers[layerIdx].b.Grad(kThreadIdx) = ctx.mlp.layers[layerIdx].b.Grad(kThreadIdx) / numSamples;
+                    batchElement.mlp.layers[layerIdx].b.Grad(kThreadIdx) = ctx.mlp.layers[layerIdx].b.Grad(kThreadIdx) / numSamples;
                 }
+            }
+            if (kThreadIdx == 0)
+            {
+                batchElement.loss = ctx.loss / numSamples;
             }
         }
 
@@ -253,37 +260,42 @@ namespace Flair
             Reduces accumulated gradients and loss values over the mini batch and stores them in the 0th layer
         **/
         template<typename PolicyT>
-        __global__ void ReduceGradientsKernel(KernelData<PolicyT> kernelData, const bool span, const int stride)
+        __global__ void ReduceGradientsKernel(KernelData<PolicyT> kernelData, const int stride)
         {
             if (kBlockIdx * (stride + 1) >= PolicyT::kMiniBatchSize) { return; }
 
             // Reduce the MLP gradients
-            auto& thisMlp = kernelData.miniBatch[kBlockIdx * stride].mlp;
-            const auto& otherMlp = kernelData.miniBatch[kBlockIdx * (stride + 1)].mlp;
+            auto& thisElement = kernelData.miniBatch[kBlockIdx * stride];
+            const auto& otherElement = kernelData.miniBatch[kBlockIdx * (stride + 1)];
             for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
             {
-                thisMlp.layers[layerIdx].w.Grad(kThreadIdx) += otherMlp.layers[layerIdx].w.Grad(kThreadIdx);
+                thisElement.mlp.layers[layerIdx].w.Grad(kThreadIdx) += otherElement.mlp.layers[layerIdx].w.Grad(kThreadIdx);
                 if (kThreadIdx < PolicyT::kWidth)
                 {
-                    thisMlp.layers[layerIdx].b.Grad(kThreadIdx) += otherMlp.layers[layerIdx].b.Grad(kThreadIdx);
+                    thisElement.mlp.layers[layerIdx].b.Grad(kThreadIdx) += otherElement.mlp.layers[layerIdx].b.Grad(kThreadIdx);
                 }
             }
-
-            // Reduce the accumulated loss
-            kernelData.miniBatch[kBlockIdx * stride].loss += kernelData.miniBatch[kBlockIdx * (stride + 1)].loss;
+            if (kThreadIdx == 0)
+            {
+                thisElement.loss += otherElement.loss;
+            }
 
             __syncthreads();
 
             // On the last reduce, average the accumulated gradients
-            if (span == PolicyT::kMiniBatchSize >> 1)
+            if (stride == PolicyT::kMiniBatchSize >> 1)
             {
                 for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
                 {
-                    thisMlp.layers[layerIdx].w.Grad(kThreadIdx) /= PolicyT::kMiniBatchSize;
+                    thisElement.mlp.layers[layerIdx].w.Grad(kThreadIdx) /= PolicyT::kMiniBatchSize;
                     if (kThreadIdx < PolicyT::kWidth)
                     {
-                        thisMlp.layers[layerIdx].b.Grad(kThreadIdx) /= PolicyT::kMiniBatchSize;
+                        thisElement.mlp.layers[layerIdx].b.Grad(kThreadIdx) /= PolicyT::kMiniBatchSize;
                     }
+                }                
+                if (kThreadIdx == 0)
+                {
+                    thisElement.loss /= PolicyT::kMiniBatchSize;
                 }
             }
         }
@@ -294,7 +306,7 @@ namespace Flair
         **/
         __forceinline__ __device__ void Adam(float& param, const float& grad, float& mo1, float& mo2)
         {
-            constexpr float kAlpha = 1e-2;
+            constexpr float kAlpha = 1e-4;
             constexpr float kBeta1 = 0.9;
             constexpr float kBeta2 = 0.999;
             constexpr float kEpsilon = 1e-8;
@@ -313,9 +325,9 @@ namespace Flair
             auto& mlpLayer = kernelData.miniBatch[0].mlp.layers[kBlockIdx];
             auto& adamLayer = kernelData.optimiser->layers[kBlockIdx];
 
-            // Update the gradients
             if (kThreadIdx < PolicyT::kWidth * PolicyT::kWidth)
             {
+                // Update the weights
                 Adam(mlpLayer.w[kThreadIdx], mlpLayer.w.Grad(kThreadIdx), adamLayer.w[kThreadIdx], adamLayer.w.Grad(kThreadIdx));
             }
             else if (kThreadIdx < PolicyT::kWidth * (1 + PolicyT::kWidth))
@@ -323,6 +335,11 @@ namespace Flair
                 // Update the biases
                 const int biasIdx = kThreadIdx - PolicyT::kWidth * PolicyT::kWidth;
                 Adam(mlpLayer.b[biasIdx], mlpLayer.b.Grad(biasIdx), adamLayer.b[biasIdx], adamLayer.b.Grad(biasIdx));
+            }
+
+            if (kKernelIdx == 0)
+            {
+                *kernelData.loss = kernelData.miniBatch[0].loss;
             }
         }
 
@@ -335,11 +352,19 @@ namespace Flair
         }
 
         template<typename PolicyT>
-        __forceinline__ __host__ void ReduceGradients(KernelData<PolicyT> kernelData, const int span, const int stride)
+        __forceinline__ __host__ void ReduceGradients(KernelData<PolicyT> kernelData)
         {
-            constexpr int kThreadsPerBlock = PolicyT::kWidth * PolicyT::kWidth;
-            AssertFmt(kThreadsPerBlock <= 1024, "Exceeded block limit of 1024 threads");
-            ReduceGradientsKernel << <span, kThreadsPerBlock >> > (kernelData, span, stride);
+            if (PolicyT::kMiniBatchSize > 1)
+            {
+                constexpr int kThreadsPerBlock = PolicyT::kWidth * PolicyT::kWidth;
+                AssertFmt(kThreadsPerBlock <= 1024, "Exceeded block limit of 1024 threads");
+
+                for (int stride = 2; stride < PolicyT::kMiniBatchSize; stride <<= 1)
+                {
+                    const int kNumBlocks = PolicyT::kMiniBatchSize / stride;
+                    ReduceGradientsKernel << <kNumBlocks, kThreadsPerBlock >> > (kernelData, stride);
+                }
+            }
         }
 
         template<typename PolicyT>
