@@ -45,7 +45,63 @@ namespace Flair
         }
     }
 
-    __host__ void TestSquareTensorMul(const bool verbose, int& errorCount)
+    __host__ void TestSquare8x8TensorMul(const bool verbose, int& errorCount)
+    {
+        constexpr float kErrorThreshold = 1e-6;
+        constexpr int N = 8;
+
+        Cuda::Object<Tensor2D<N, N, false>> X;
+        Cuda::Object<Tensor1D<N, false>> v;
+        Cuda::Object<Tensor1D<N, false>> r;
+
+        // NOTE: Row-major order constuctor
+        X <<= Tensor2D<N, N, false>({ {0.652467807974029, 0.633070356251368, 0.68281308686666,
+                                      0.566351831093323, 0.935202196659332, 0.976187756902101,
+                                      0.238451694824191, 0.637562295790242}, {0.101098380420291,
+                                      0.64552469382196, 0.159522225810158, 0.813787851275935,
+                                      0.904785470451441, 0.640712457447006, 0.306539727511699,
+                                      0.756197597784415}, {0.876688377753995, 0.019128400638492,
+                                      0.542616681289372, 0.352370872609403, 0.899199876332835,
+                                      0.968878409682844, 0.876215073712776,
+                                      0.340281445182268}, {0.282418445376708, 0.296477088550717,
+                                      0.695952684977098, 0.514103363052473, 0.781133951426663,
+                                      0.403595994418056, 0.38515245011824,
+                                      0.379794153435092}, {0.43271249281167, 0.123592882524315,
+                                      0.692030134942357, 0.941189043995746, 0.0907422167282328,
+                                      0.816402708208848, 0.956728218285361,
+                                      0.639900147904955}, {0.957129994567048, 0.635376315590379,
+                                      0.490904095442375, 0.37038068606824, 0.314276772143277,
+                                      0.65659249717978, 0.301137853531729,
+                                      0.847904621825146}, {0.0226571509809761, 0.163593478192408,
+                                      0.694356353588249, 0.766335669320467, 0.210146094825781,
+                                      0.69231648501517, 0.423810127960657,
+                                      0.30261765393665}, {0.0943698123927186, 0.796860647653511,
+                                      0.0290345835834827, 0.361089338620035, 0.294762947477966,
+                                      0.191027881734111, 0.74805085393239, 0.549756115833064} });
+
+        // Input vector
+        v <<= Tensor1D<N, false>({ {0.745997562146465}, {0.490766766044425}, {0.492705416561543}, {0.52926641341919}, {0.349661831500469}, {0.515445231303594}, {0.341862603700548}, {0.310267848957651} });
+
+        // Targets for multiply and multiply transpose
+        const Tensor1D<N, false> targetMul({ {2.54311463071826}, {1.88756865074411}, {2.33618641198045}, {1.70185336760994}, {2.20071450422554}, {2.27809276352237}, {1.51400595076495}, {1.29472435169277} });
+        const Tensor1D<N, false> targetMulT({ {1.79945551487407}, {1.62929517783041}, {1.96475333274066}, {2.16161456090267}, {2.35518392263892}, {2.65350477631207}, {1.83062043735004}, {2.15022972677939} });
+
+        // Test and check errors
+        KernelMulSquare<false> << <1, N* N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
+        IsOk(cudaDeviceSynchronize());
+        r.Download();
+        const float errorMul = CwiseMax(Abs(*r - targetMul));
+        CheckErrorThreshold(errorMul, kErrorThreshold, *r, targetMul, "TestSquare8x8TensorMul: mul", errorCount);
+
+        KernelMulSquare<true> << <1, N* N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
+        IsOk(cudaDeviceSynchronize());
+        r.Download();
+        const float errorMulT = CwiseMax(Abs(*r - targetMulT));
+        CheckErrorThreshold(errorMulT, kErrorThreshold, *r, targetMulT, "TestSquare8x8TensorMul: mul transpose", errorCount);
+    }
+
+
+    __host__ void TestSquare4x4TensorMul(const bool verbose, int& errorCount)
     {
         constexpr float kErrorThreshold = 1e-6;
         constexpr int N = 4;
@@ -72,13 +128,13 @@ namespace Flair
         IsOk(cudaDeviceSynchronize());
         r.Download();
         const float errorMul = CwiseMax(Abs(*r - targetMul));
-        CheckErrorThreshold(errorMul, kErrorThreshold, *r, targetMul, "TestSquareTensorMul: mul", errorCount);
+        CheckErrorThreshold(errorMul, kErrorThreshold, *r, targetMul, "TestSquare4x4TensorMul: mul", errorCount);
 
         KernelMulSquare<true> << <1, N*N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
         IsOk(cudaDeviceSynchronize());
         r.Download();
         const float errorMulT = CwiseMax(Abs(*r - targetMulT));
-        CheckErrorThreshold(errorMulT, kErrorThreshold, *r, targetMulT, "TestSquareTensorMul: mul transpose", errorCount);     
+        CheckErrorThreshold(errorMulT, kErrorThreshold, *r, targetMulT, "TestSquare4x4TensorMul: mul transpose", errorCount);     
     }    
 
     __host__ void TestNonSquareTensorMul(const bool verbose, int& errorCount)
@@ -127,7 +183,8 @@ namespace Flair
     {
         int errorCount = 0;
         
-        TestSquareTensorMul(verbose, errorCount);
+        TestSquare4x4TensorMul(verbose, errorCount);
+        TestSquare8x8TensorMul(verbose, errorCount);
         TestNonSquareTensorMul(verbose, errorCount);
 
         AssertFmt(errorCount == 0, "Test failed with %i errors", errorCount);

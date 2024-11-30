@@ -76,6 +76,7 @@ namespace Flair
                 }
             }
             *pixel = m2 / 9 - sqr(m / 9); // Variance
+            *pixel = std::pow(*pixel, 0.6f); // Mix
             //*pixel = std::sqrt(*pixel); // Standard deviation
 
             maxVarMap[threadIdx] = std::max(*pixel, maxVarMap[threadIdx]);
@@ -173,11 +174,12 @@ namespace Flair
                         *targetIt = waveletImage.Sample(waveletImage.Width() / 2 + x + u, y + v);
                     }
                 }
-                mean /= 16;
+                mean = std::max(1e-3f, mean / 16);
 
-                for (auto& f : ctx.inputSamples[sampleIdx])
+                for(int i = 0; i < 16; ++i)
                 {
-                    f = (f - mean) / std::max(1.f, mean);
+                    ctx.inputSamples[sampleIdx][i] = (ctx.inputSamples[sampleIdx][i] - mean) / mean;
+                    ctx.targetSamples[sampleIdx][i] /= mean;
                 }
             }
         };
@@ -194,23 +196,6 @@ namespace Flair
         }
 
         printf_red("Total samples: %i\n", dataset.inputSamples.size());
-
-        // Render the samples
-        for (int i = 0; i < dataset.inputSamples.size(); ++i)
-        {
-            int x = 4 * (i % (region.Width() / 4));
-            int y = 4 * (i / (region.Width() / 4));
-            auto inputIt = dataset.inputSamples[i].begin();
-            auto targetIt = dataset.targetSamples[i].begin();
-            for (int v = 0; v < 4; ++v)
-            {
-                for (int u = 0; u < 4; ++u, ++inputIt, ++targetIt)
-                {
-                    *waveletImage.At(x + u, y + v) = *inputIt;
-                    *waveletImage.At(x + u, 16 + y + v) = *targetIt;
-                }
-            }
-        }
 
         return dataset;
 
@@ -240,13 +225,36 @@ namespace Flair
         MLPDataset dataset = GenerateTrainingSet(chnlData);
 
         NN::MLP mlp;
-        mlp.Train(dataset);
+        const auto& outputs = mlp.Train(dataset);
+
+        Assert(outputs.size() == dataset.inputSamples.size());
+
+        // Render the samples
+        ImageRegion region(0, 0, waveletImage.Width() / 2 - 1, waveletImage.Height() / 2 - 1);
+        const int numRows = 1 + int(dataset.inputSamples.size() / (waveletImage.Width() / (4 * 2)));
+        for (int i = 0; i < dataset.inputSamples.size(); ++i)
+        {
+            int x = 4 * (i % (region.Width() / 4));
+            int y = 4 * (i / (region.Width() / 4));
+            auto inputIt = dataset.inputSamples[i].begin();
+            auto targetIt = dataset.targetSamples[i].begin();
+            auto outputIt = outputs[i].begin();
+            for (int v = 0; v < 4; ++v)
+            {
+                for (int u = 0; u < 4; ++u, ++inputIt, ++targetIt, ++outputIt)
+                {
+                    *chnlData.At(x + u, y + v) = *inputIt;
+                    *chnlData.At(x + u, 4 * numRows + y + v) = *targetIt;
+                    *chnlData.At(x + u, 8 * numRows + y + v) = *outputIt;
+                }
+            }
+        }
 
         waveletImage.Erase();
         waveletImage.ParallelMap([&](const int x, const int y, const int, float* pixel)
             {
                 const float& c = chnlData.At(x, y)[0];
-                pixel[(c < 0) ? 0 : 1] = std::abs(c);           
+                pixel[(c < 0) ? 0 : 1] = std::pow(std::abs(c), 2.0f);
             });        
 
         return waveletImage;

@@ -21,8 +21,10 @@ add_executable(mlplifter
     src/core/nn/TensorOps.cuh
     src/core/nn/Tensor2D.cuh
     src/core/nn/Tensor1D.cuh
+    src/core/nn/Activation.cuh
+    src/core/nn/Loss.cuh
     src/core/nn/ContinuousRandomVariable.cuh
-    src/core/nn/Indirection.cuh
+    src/core/nn/Permute.cuh
     src/core/nn/Modules.cuh
     src/core/nn/DataLoader.cuh
     src/core/nn/MLP/MLP.cu

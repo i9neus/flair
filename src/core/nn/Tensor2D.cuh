@@ -45,7 +45,7 @@ namespace Flair
         template<typename RNG>
         __host__ void Initialise(RNG& rng)
         {
-            for (int i = 0; i < M * N; ++i) { rawData[i] = rng() / N; }
+            for (int i = 0; i < M * N; ++i) { rawData[i] = rng(); }
             ZeroGrad();
         }
 

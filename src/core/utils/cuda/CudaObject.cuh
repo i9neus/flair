@@ -39,6 +39,7 @@ namespace Flair
             }
 
             __host__ Type* GetDeviceData() { return cu_deviceData; }
+            __host__ const Type* GetDeviceData() const { return cu_deviceData; }
 
             __host__ inline Type* operator->() { return &m_hostData; }
             __host__ inline const Type* operator->() const { return &m_hostData; }
@@ -48,6 +49,14 @@ namespace Flair
             __host__ Object& operator=(const Type& hostCopy)
             {
                 m_hostData = hostCopy;               
+                return *this;
+            }
+
+            // Copy to host memory and upload to device
+            __host__ Object& operator<<=(const Type hostCopy)
+            {
+                m_hostData = hostCopy;
+                Upload();
                 return *this;
             }
 
@@ -71,19 +80,5 @@ namespace Flair
             lhs = *rhs;
             return lhs;
         }
-
-        // Copy to host memory and upload to device
-        template<typename Type>
-        __host__ inline Object<Type>& operator<<=(Object<Type>& lhs, Type rhs)
-        {
-            lhs = rhs;
-            lhs.Upload();
-            return lhs;
-        }
-
-        template<typename Type>
-        __host__ inline Object<Type>& operator>>=(Object<Type>& lhs, Type& rhs) { return rhs <<= lhs; }
-        template<typename Type>
-        __host__ inline Type& operator>>=(Type& lhs, Object<Type>& rhs) { return rhs <<= lhs; }
     }   
 }

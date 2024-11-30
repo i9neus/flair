@@ -43,7 +43,7 @@ namespace Flair
             }
         }        
 
-        class Indirection
+        class Permutation
         {
         private:
             Cuda::Vector<int, kCudaMemMirrored>         m_indices;
@@ -52,14 +52,17 @@ namespace Flair
             std::uniform_int_distribution<int>          m_rng;
 
         public:
-            Indirection(const int size, const uint32_t seed = 0) : 
+            Permutation(const int size, const uint32_t seed = 0) : 
                 m_mt(seed),
                 m_indices(size),
                 m_swap(size)
             {}
 
-            __host__ Cuda::Vector<int, kCudaMemMirrored>& operator*() { return m_indices; }
-            __host__ Cuda::Vector<int, kCudaMemMirrored>* operator->() { return &m_indices; }
+            __host__ std::vector<int>& operator*() { return m_indices.Data(); }
+            __host__ std::vector<int>* operator->() { return &m_indices.Data(); }
+
+            __host__ int* GetDeviceData() { return m_indices.GetDeviceData(); }
+            __host__ const int* GetDeviceData() const { return m_indices.GetDeviceData(); }
 
             // Check that the each index in the vector maps to one and only one other element 
             __host__ void CheckBijective()

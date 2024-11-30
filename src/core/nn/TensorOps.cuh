@@ -32,13 +32,13 @@ namespace Flair
     }*/
 
     // Matrix multiply of an NxM tensor with K-tensor. 
-    template<bool Transpose, int N, int M, int V, int W, bool HasGradM, bool HasGradV, bool HasGradW>
-    __forceinline__ __device__ void MulImpl(const Tensor2D<N, M, HasGradM>& m, const Tensor1D<V, HasGradV>& v, Tensor1D<W, HasGradW>& w, float(&scratch)[N][M])
-    {        
+    template<bool Transpose, int N, int M, int V, int W, bool HasGradM, bool HasGradVW>
+    __forceinline__ __device__ void MulImpl(const Tensor2D<N, M, HasGradM>& m, const Tensor1D<V, HasGradVW>& v, Tensor1D<W, HasGradVW>& w, float(&scratch)[N][M])
+    {
         // Block must have have at least as many threads as the tensor has elements
         CudaAssertDebug(blockDim.x >= N * M);
         // Tensor dimensions must match up
-        CudaAssertDebugFmt(Transpose ? (M == V) : (M == W), 
+        CudaAssertDebugFmt(Transpose ? (M == V) : (M == W),
             "Tensor dimensions (%ix%i)%s are incompatible with input vector of dimension %i", N, M, Transpose ? "T" : "", V);
         CudaAssertDebugFmt(Transpose ? (N == W) : (N == V),
             "Tensor dimensions (%ix%i)%s are incompatible with output vector of dimension %i", N, M, Transpose ? "T" : "", W);
@@ -77,14 +77,14 @@ namespace Flair
         }
     }
 
-    template<int N, int M, bool HasGradM, bool HasGradV, bool HasGradW>
-    __forceinline__ __device__ void MulT(const Tensor2D<N, M, HasGradM>& m, const Tensor1D<M, HasGradV>& v, Tensor1D<N, HasGradW>& w, float(&scratch)[N][M])
+    template<int N, int M, bool HasGradM, bool HasGradVW>
+    __forceinline__ __device__ void MulT(const Tensor2D<N, M, HasGradM>& m, const Tensor1D<M, HasGradVW>& v, Tensor1D<N, HasGradVW>& w, float(&scratch)[N][M])
     {
         MulImpl<true>(m, v, w, scratch);
     }
 
-    template<int N, int M, bool HasGradM, bool HasGradV, bool HasGradW>
-    __forceinline__ __device__ void Mul(const Tensor2D<N, M, HasGradM>& m, const Tensor1D<N, HasGradV>& v, Tensor1D<M, HasGradW>& w, float(&scratch)[N][M])
+    template<int N, int M, bool HasGradM, bool HasGradVW>
+    __forceinline__ __device__ void Mul(const Tensor2D<N, M, HasGradM>& m, const Tensor1D<N, HasGradVW>& v, Tensor1D<M, HasGradVW>& w, float(&scratch)[N][M])
     {
         MulImpl<false>(m, v, w, scratch);
     }

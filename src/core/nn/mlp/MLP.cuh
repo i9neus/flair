@@ -17,7 +17,7 @@ namespace Flair
         {
         public:
             // The number of weight matrices (equal to hidden layers - 1)
-            static constexpr int kDepth = 3;
+            static constexpr int kDepth = 4;
 
             // The width of the network (number nodes)
             static constexpr int kWidth = 16;
@@ -38,7 +38,7 @@ namespace Flair
             MLP();
 
             void Initialise();
-            void Train(const DataLoader<Tensor1D<16, false>>& data);
+            const std::vector<MLP::Sample> Train(const DataLoader<Sample>& data);
         };
     }  
 }

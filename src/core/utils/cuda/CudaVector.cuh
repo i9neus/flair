@@ -2,6 +2,7 @@
 
 #include "CudaUtils.cuh"
 #include "core/utils/ConsoleUtils.h"
+#include <vector>
 
 namespace Flair
 {
@@ -10,29 +11,12 @@ namespace Flair
         template<typename Type, int Alloc>
         class Vector
         {
+            friend std::vector<Type>& operator<<=(std::vector<Type>&, Vector<Type, Alloc>&);
+
         private:
-            Type*               m_hostData;
+            std::vector<Type>   m_hostData;
             size_t              m_size;
             Type*               cu_deviceData;
-
-        public:
-            template<typename ItType>
-            class Iterator
-            {
-                friend class Vector;
-                Type* m_mem;
-                size_t m_idx;
-
-            private:
-                Iterator(Type* mem, const int idx) : m_mem(mem), m_idx(idx) {}
-
-            public:
-                __host__ __forceinline__ Iterator& operator++() { ++m_idx; return *this; }
-                __host__ __forceinline__ Iterator& operator--() { --m_m_idx; return *this; }
-                __host__ __forceinline__ bool operator!=(const Iterator& other) const { return m_idx != other.m_idx; }
-                __host__ __forceinline__ ItType& operator*() { return m_mem[m_idx]; }
-                __host__ __forceinline__ ItType* operator->() { return &m_mem[idx]; }
-            };
 
         private: 
             __forceinline__ __host__  void AssertHost() const
@@ -42,7 +26,6 @@ namespace Flair
 
         public:           
             __host__ Vector() :
-                m_hostData(nullptr),
                 m_size(0),
                 cu_deviceData(0)
             {
@@ -75,13 +58,8 @@ namespace Flair
                 // Reallocate and move host data
                 if (Alloc == kCudaMemMirrored)
                 {
-                    Type* newHostData = new Type[newSize];
-                    if (m_hostData)
-                    {
-                        std::memcpy(newHostData, m_hostData, sizeof(Type) * newSize);
-                        delete[] m_hostData;
-                    }
-                    m_hostData = newHostData;
+                    m_hostData.resize(newSize);
+                    m_hostData.shrink_to_fit();                    
                 }
 
                 // Reallocate and move device data
@@ -94,22 +72,26 @@ namespace Flair
                 }
                 cu_deviceData = newDeviceData;
 
-                // Update and resync
+                // Update and resyncb
                 m_size = newSize;
-                if (resync) { Upload(); }
+                if (Alloc == kCudaMemMirrored && resync) 
+                { 
+                    Upload(); 
+                }
             }
 
             __host__ ~Vector()
             {
                 if (cu_deviceData) { cudaFree(cu_deviceData); }
-                if (m_hostData) { delete[] m_hostData; }
             }
 
             __host__ Type* GetDeviceData() { return cu_deviceData; }
+            __host__ const Type* GetDeviceData() const { return cu_deviceData; }
 
             inline Type& operator[](const int idx) { AssertHost(); return m_hostData[idx]; }
             inline const Type& operator[](const int idx) const { AssertHost(); return m_hostData[idx]; }
             __host__ inline size_t Size() const { return m_size; }
+            __host__ inline size_t IsEmpty() const { return m_size == 0; }
 
             __host__ Vector& operator=(Vector&& other)
             {
@@ -117,53 +99,60 @@ namespace Flair
 
                 cu_deviceData = other.cu_deviceData;
                 m_size = other.m_size;
-                m_hostData = other.m_hostData;
+                m_hostData = std::move(other.m_hostData);
                 other.cu_deviceData = nullptr;
                 other.m_size = 0;
-                other.m_hostData = nullptr;
+                other.m_hostData = std::vector<Type>();
                 
+                return *this;
+            }
+
+            // Copy to host memory and upload to device
+            __host__ Vector& operator<<=(const std::vector<Type>& rhs)
+            {
+                Resize(rhs.size(), false);
+                if (m_size > 0)
+                {
+                    if (Alloc == kCudaMemMirrored)
+                    {
+                        memcpy(m_hostData.data(), rhs.data(), sizeof(Type) * m_size);
+                    }
+                    IsOk(cudaMemcpy(cu_deviceData, rhs.data(), sizeof(Type) * m_size, cudaMemcpyHostToDevice));
+                }
                 return *this;
             }
 
             __host__ Vector& operator=(const std::vector<Type>& otherCopy)
             {
                 Resize(otherCopy.size(), false);
-
                 if (m_size > 0)
                 {
-                    if (Alloc == kCudaMemMirrored)
-                    {
-                        memcpy(m_hostData, otherCopy.data(), sizeof(Type) * m_size);
-                        IsOk(cudaMemcpy(cu_deviceData, m_hostData, sizeof(Type) * m_size, cudaMemcpyHostToDevice));
-                    }
-                    else
-                    {
-                        IsOk(cudaMemcpy(cu_deviceData, otherCopy.data(), sizeof(Type) * m_size, cudaMemcpyHostToDevice));
-                    }
+                    AssertMsg(Alloc == kCudaMemMirrored, "Operator = for device-only vectors does nothing. Use <<= instead.");
+                    memcpy(m_hostData.data(), otherCopy.data(), sizeof(Type) * m_size);
                 }
                 return *this;
             }
 
-            __inline__ __host__ void Download()
+            __inline__ __host__ std::vector<Type>& Download()
             {
-                if (Alloc == kCudaMemMirrored)
-                {
-                    IsOk(cudaMemcpy(m_hostData, cu_deviceData, sizeof(Type) * m_size, cudaMemcpyDeviceToHost));
-                }
+                AssertHost();
+                IsOk(cudaMemcpy(m_hostData.data(), cu_deviceData, sizeof(Type) * m_size, cudaMemcpyDeviceToHost));
+                return m_hostData;
             }
 
             __inline__ __host__ void Upload()
             {
-                if (Alloc == kCudaMemMirrored)
-                {
-                    IsOk(cudaMemcpy(cu_deviceData, m_hostData, sizeof(Type) * m_size, cudaMemcpyHostToDevice));
-                }
+                AssertHost();
+                IsOk(cudaMemcpy(cu_deviceData, m_hostData.data(), sizeof(Type) * m_size, cudaMemcpyHostToDevice));                
             }
 
-            __host__ __forceinline__ Iterator<Type> begin() { AssertHost(); return Iterator<Type>(m_hostData, 0); }
-            __host__ __forceinline__ Iterator<const Type> begin() const { AssertHost(); return Iterator<const Type>(m_hostData, 0); }
-            __host__ __forceinline__ Iterator<Type> end() { AssertHost(); return Iterator<Type>(m_hostData, m_size); }
-            __host__ __forceinline__ Iterator<const Type> end() const { AssertHost(); return Iterator<const Type>(m_hostData, m_size); }
+            __host__ __forceinline__ std::vector<Type>::iterator begin() { AssertHost(); return m_hostData.begin(); }
+            __host__ __forceinline__ std::vector<Type>::const_iterator begin() const { AssertHost(); return m_hostData.cbegin(); }
+            __host__ __forceinline__ std::vector<Type>::iterator end() { AssertHost(); return m_hostData.end(); }
+            __host__ __forceinline__ std::vector<Type>::const_iterator end() const { AssertHost(); return m_hostData.cend(); }
+
+            __host__ __forceinline__ std::vector<Type>& Data() { AssertHost(); return m_hostData; }
+            __host__ __forceinline__ const std::vector<Type>& Data() const { AssertHost(); return m_hostData; }
         };
 
         template<typename Type, int Alloc>
@@ -172,6 +161,26 @@ namespace Flair
             Vector<Type, Alloc> temp = std::move(a);
             a = std::move(b);
             b = std::move(temp);
+        }
+
+        // Download from device and copy to host memory
+        template<typename Type, int Alloc>
+        __host__ static std::vector<Type>& operator<<=(std::vector<Type>& lhs, Vector<Type, Alloc>& rhs)
+        {
+            lhs.resize(rhs.m_hostData.size());
+            if (!lhs.empty())
+            {
+                if (Alloc == kCudaMemMirrored)
+                {
+                    lhs.Download();
+                    memcpy(lhs.data(), rhs.m_hostData.data(), sizeof(Type) * lhs.size());
+                }
+                else
+                {
+                    IsOk(cudaMemcpy(lhs.data(), rhs.cu_deviceData, sizeof(Type) * lhs.size(), cudaMemcpyHostToDevice));
+                }
+            }
+            return lhs;
         }
     }
 }

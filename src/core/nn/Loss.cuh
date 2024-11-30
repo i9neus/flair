@@ -26,9 +26,9 @@ namespace Flair
             // Leaky ReLU activation function
             struct L2
             {
-                static __forceinline__ __device__ float F(const float& a, const float& t)
+                static __forceinline__ __device__ float F(const float& f, const float& t)
                 {
-                    return sqr(a - t);
+                    return sqr(f - t);
                 }
 
                 static __forceinline__ __device__ float dF(const float& f, const float& t)

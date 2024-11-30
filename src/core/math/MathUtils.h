@@ -30,7 +30,11 @@ namespace Flair
     static constexpr float kInvPhi      = 1 / kPhi;
     static constexpr float kLog2        = 0.6931471805599453f;
 
-    template<typename T> __forceinline__  __host__ __device__ T  sign(const T f) { return std::copysign(T(1), f); }
+    template<typename T> __forceinline__  __host__ __device__ T sign(const T f) 
+    {
+        //return std::copysign(T(1), f);
+        return 1 - 2 * T(f < 0);
+    }
 
     __host__ __device__ __forceinline__ float  __host__ __device__ toRad(float deg) { return kTwoPi * deg / 360; }
     __host__ __device__ __forceinline__ float  __host__ __device__ toDeg(float rad) { return 360 * rad / kTwoPi; }
