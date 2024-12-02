@@ -34,6 +34,7 @@ add_executable(mlplifter
     src/core/io/ImageIO.cpp
     src/core/io/ImageIO.h
     src/core/io/FilesystemUtils.h
+    src/core/image/ImageOps.h
     src/core/math/MathUtils.h
     src/core/math/wavelets/1d/LiftingDWT1.h
     src/core/math/wavelets/2d/StaticDWT2.h

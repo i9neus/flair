@@ -4,8 +4,9 @@
 #include "core/utils/cuda/CudaVector.cuh"
 #include "core/math/MathUtils.h"
 #include "../TensorOps.cuh"
-#include "../DataLoader.cuh"
 #include <memory>
+#include <functional>
+#include <vector>
 
 namespace Flair
 {
@@ -29,16 +30,18 @@ namespace Flair
             using Sample = Tensor1D<kWidth, false>;
             using Optimiser = SequentialLayers<kWidth, kDepth>;
 
+            using ReadBatchFunctor = std::function<bool(std::vector<Sample>&, const int)>;
+            using WriteBatchFunctor = std::function<void(const std::vector<Sample>&, const int)>;
+
         private:
-            /*std::unique_ptr<Cuda::Object<Model>>  m_deviceModel;
-            std::unique_ptr<Cuda::Object<Sample>> m_deviceSample;
-            std::unique_ptr<Cuda::Object<Sample>> m_deviceTarget;*/
+            Cuda::Vector<char, kCudaMemMirrored>  m_deviceModelData;
 
         public:
             MLP();
 
             void Initialise();
-            const std::vector<MLP::Sample> Train(const DataLoader<Sample>& data);
+            void Train(const std::vector<Sample>&, const std::vector<Sample>&);
+            void Infer(ReadBatchFunctor readBatch, WriteBatchFunctor writeBatch);
         };
     }  
 }

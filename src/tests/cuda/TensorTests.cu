@@ -26,7 +26,7 @@ namespace Flair
     }
 
     template<typename ErrType, typename RefType>
-    __host__ void CheckErrorThreshold(float errVal, float threshold, const ErrType& errTensor, const RefType& refTensor, const char* message, int& errorCount)
+    __host__ void CheckErrorThreshold(float errVal, float threshold, const ErrType& errTensor, const RefType& refTensor, const char* message, int& errorCount, const bool verbose)
     {
         if (errVal > threshold)
         {
@@ -39,7 +39,7 @@ namespace Flair
             
             errorCount++;
         }
-        else
+        else if(verbose)
         {
             printf_green("%s: PASSED!\n", message);
         }
@@ -91,13 +91,13 @@ namespace Flair
         IsOk(cudaDeviceSynchronize());
         r.Download();
         const float errorMul = CwiseMax(Abs(*r - targetMul));
-        CheckErrorThreshold(errorMul, kErrorThreshold, *r, targetMul, "TestSquare8x8TensorMul: mul", errorCount);
+        CheckErrorThreshold(errorMul, kErrorThreshold, *r, targetMul, "TestSquare8x8TensorMul: mul", errorCount, verbose);
 
         KernelMulSquare<true> << <1, N* N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
         IsOk(cudaDeviceSynchronize());
         r.Download();
         const float errorMulT = CwiseMax(Abs(*r - targetMulT));
-        CheckErrorThreshold(errorMulT, kErrorThreshold, *r, targetMulT, "TestSquare8x8TensorMul: mul transpose", errorCount);
+        CheckErrorThreshold(errorMulT, kErrorThreshold, *r, targetMulT, "TestSquare8x8TensorMul: mul transpose", errorCount, verbose);
     }
 
 
@@ -128,13 +128,13 @@ namespace Flair
         IsOk(cudaDeviceSynchronize());
         r.Download();
         const float errorMul = CwiseMax(Abs(*r - targetMul));
-        CheckErrorThreshold(errorMul, kErrorThreshold, *r, targetMul, "TestSquare4x4TensorMul: mul", errorCount);
+        CheckErrorThreshold(errorMul, kErrorThreshold, *r, targetMul, "TestSquare4x4TensorMul: mul", errorCount, verbose);
 
         KernelMulSquare<true> << <1, N*N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
         IsOk(cudaDeviceSynchronize());
         r.Download();
         const float errorMulT = CwiseMax(Abs(*r - targetMulT));
-        CheckErrorThreshold(errorMulT, kErrorThreshold, *r, targetMulT, "TestSquare4x4TensorMul: mul transpose", errorCount);     
+        CheckErrorThreshold(errorMulT, kErrorThreshold, *r, targetMulT, "TestSquare4x4TensorMul: mul transpose", errorCount, verbose);     
     }    
 
     __host__ void TestNonSquareTensorMul(const bool verbose, int& errorCount)
@@ -170,13 +170,13 @@ namespace Flair
         IsOk(cudaDeviceSynchronize());
         rv.Download();
         const float errorMul = CwiseMax(Abs(*rv - targetMul));
-        CheckErrorThreshold(errorMul, kErrorThreshold, *rv, targetMul, "TestNonSquareTensorMul: mul", errorCount);
+        CheckErrorThreshold(errorMul, kErrorThreshold, *rv, targetMul, "TestNonSquareTensorMul: mul", errorCount, verbose);
 
         KernelMulNonSquare<true> << <1, N*M >> > (X.GetDeviceData(), w.GetDeviceData(), rw.GetDeviceData());
         IsOk(cudaDeviceSynchronize());
         rw.Download();
         const float errorMulT = CwiseMax(Abs(*rw - targetMulT));
-        CheckErrorThreshold(errorMulT, kErrorThreshold, *rw, targetMulT, "TestNonSquareTensorMul: mul transpose", errorCount);
+        CheckErrorThreshold(errorMulT, kErrorThreshold, *rw, targetMulT, "TestNonSquareTensorMul: mul transpose", errorCount, verbose);
     }
 
     __host__ void RunTensorTests(const bool verbose)
@@ -189,7 +189,7 @@ namespace Flair
 
         AssertFmt(errorCount == 0, "Test failed with %i errors", errorCount);
 
-        printf_green("All tensor tests okay!\n");
+        if (verbose) { printf_green("All tensor tests okay!\n"); }
     }
 
 }

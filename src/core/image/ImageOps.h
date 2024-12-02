@@ -4,41 +4,8 @@
 
 namespace Flair
 {
-    /*template<typename Type, int Channels>
-    Image<Type, 1> ExtractChannel(const Image<Type, Channels>& inputImg, const int chnlIdx)
-    {
-        Image<Type, 1> chnlImg(inputImg.Width(), inputImg.Height());
-        for (int i = 0; i < inputImg.Area(); ++i)
-        {
-            chnlImg[i] = inputImg[i * Channels + chnlIdx];
-        }
-        return chnlImg;
-    }
-
     template<typename Type, int Channels>
-    Image<Type, 1> ExtractLuminance(const Image<Type, Channels>& inputImg)
-    {
-        static_assert(Channels == 3, "Extract luminance requires a 3-channel RGB image.");
-        Image<Type, 1> lum(inputImg.Width(), inputImg.Height());
-        for (int i = 0, j = 0; i < inputImg.Area(); ++i, j += 3)
-        {
-            lum[i] = inputImg[j] * 0.17691 + inputImg[j + 1] * 0.8124 + inputImg[j + 2] * 0.01063;
-        }
-        return lum;
-    }
-
-    template<typename Type, int Channels>
-    void EmplaceChannel(Image<Type, Channels>& destImg, const Image<Type, 1>& chnlData, const int chnlIdx)
-    {
-        AssertMsg(destImg.Width() == chnlData.Width() && destImg.Height() == chnlData.Height(), "Size mismatch!");
-        for (int i = 0; i < destImg.Area(); ++i)
-        {
-            destImg[i * Channels + chnlIdx] = chnlData[i];
-        }
-    }*/
-
-    template<typename Type, int Channels>
-    Image<Type, Channels> Downsample(Image<Type, Channels>& inputImg, int factor)
+    Image<Type, Channels> Downsample(const Image<Type, Channels>& inputImg, const int factor)
     {
         Image<Type, Channels> newImage(inputImg.Width() / factor, inputImg.Height() / factor);
 
@@ -72,6 +39,24 @@ namespace Flair
             }
         }
 
+        return newImage;
+    }
+
+    template<typename Type, int Channels>
+    Image<Type, Channels> Crop(const Image<Type, Channels>& inputImg, ImageRect cropRegion)
+    {
+        cropRegion = Intersection(inputImg.Rect(), cropRegion);
+
+        Image<Type, Channels> newImage(cropRegion.Width(), cropRegion.Height());
+        newImage.ParallelMap([&](const int x, const int y, const int i, float* outputPixel)
+            {
+                const float* inputPixel = inputImg.At(x + cropRegion.x0, y + cropRegion.y0);
+                for (int c = 0; c < Channels; ++c)
+                {
+                    outputPixel[c] = inputPixel[c];
+                }
+            });
+      
         return newImage;
     }
 }

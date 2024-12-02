@@ -13,20 +13,11 @@ namespace Flair
 {
     namespace NN
     {
-        template<int Width, int Depth, int MiniBatchSize, typename ActivationT, typename LossT, typename LearningRateT>
-        struct MLPPolicy
+
+        template<int Width, int Depth, int MiniBatchSize, typename ActivationT>
+        struct MLPInferencePolicy
         {
-            __host__ static void AssertValid()
-            {
-                static_assert((MiniBatchSize & (MiniBatchSize - 1)) == 0, "MiniBatchSize must be a power of two.");
-                //static_assert(std::is_same(LearningRateT, typename std::ratio<decltype(LearningRateT::Num), decltype(LearningRateT::Denom)>::value, "LearningRateT must be of type std::ratio");
-                using T = decltype(LearningRateT::num);
-            }
-
             using Activation = ActivationT;
-            using Loss = LossT;
-
-            static constexpr float kLearningRate = float(LearningRateT::num) / float(LearningRateT::den);
 
             enum : int
             {
@@ -35,24 +26,46 @@ namespace Flair
                 kMiniBatchSize = MiniBatchSize
             };
         };
+        
+        template<int Width, int Depth, int MiniBatchSize, typename ActivationT, typename LossT, typename LearningRateT>
+        struct MLPTrainingPolicy : MLPInferencePolicy<Width, Depth, MiniBatchSize, ActivationT>
+        {
+            __host__ static void AssertValid()
+            {
+                static_assert((MiniBatchSize & (MiniBatchSize - 1)) == 0, "MiniBatchSize must be a power of two.");
+                //static_assert(std::is_same(LearningRateT, typename std::ratio<decltype(LearningRateT::Num), decltype(LearningRateT::Denom)>::value, "LearningRateT must be of type std::ratio");
+                using T = decltype(LearningRateT::num);
+            }
+
+            using Loss = LossT;
+            static constexpr float kLearningRate = float(LearningRateT::num) / float(LearningRateT::den);
+        };
 
         template<typename PolicyT>
-        struct MiniBatchData
+        struct MLPData
         {
             SequentialLayers<PolicyT::kWidth, PolicyT::kDepth>  mlp;
             float                                               loss;
         };
         
         template<typename PolicyT>
-        struct KernelData
+        struct TrainingKernelData
         {           
-            MiniBatchData<PolicyT>*                                 miniBatch = nullptr;
+            MLPData<PolicyT>*                                       mlpData = nullptr;
             Tensor1D<PolicyT::kWidth, false>*                       inputVecs = nullptr;
             Tensor1D<PolicyT::kWidth, false>*                       targetVecs = nullptr;
             Tensor1D<PolicyT::kWidth, false>*                       outputVecs = nullptr;
             SequentialLayers<PolicyT::kWidth, PolicyT::kDepth>*     optimiser = nullptr;
             int*                                                    sampleIdxs = nullptr;
             float*                                                  loss = nullptr;
+            int                                                     batchSize = 0;
+        };
+
+        template<typename PolicyT>
+        struct InferenceKernelData
+        {           
+            MLPData<PolicyT>*                                       mlpData = nullptr;
+            Tensor1D<PolicyT::kWidth, false>*                       inOutVecs = nullptr;
             int                                                     batchSize = 0;
         };
 
@@ -93,6 +106,7 @@ namespace Flair
             SequentialLayers<kWidth, kDepth>    mlp;
             Tensor1D<kWidth, false>             state;
             float                               scratch2D[kWidth][kWidth];
+            int                                 batchSize;
         };
 
         template<typename Ctx>
@@ -209,7 +223,7 @@ namespace Flair
             Reduces accumulated gradients and loss values over the mini batch and stores them in the 0th layer
         **/
         template<typename PolicyT>
-        __global__ void EstimateGradientsKernel(KernelData<PolicyT> kernelData, const int miniBatchOffset)
+        __global__ void EstimateGradientsKernel(TrainingKernelData<PolicyT> kernelData, const int miniBatchOffset)
         {
             __shared__ TrainingCtx<PolicyT> ctx;
 
@@ -221,7 +235,7 @@ namespace Flair
             
             // Copy MLP data out of global memory into shared memory. 
             // NOTE: the data are pulled from the first copy in the mini-batch which serves as the master network for gradient descent
-            auto& masterMlp = kernelData.miniBatch[0].mlp;
+            auto& masterMlp = kernelData.mlpData[0].mlp;
             for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
             {
                 ctx.mlp.layers[layerIdx].w[kThreadIdx] = masterMlp.layers[layerIdx].w[kThreadIdx];
@@ -234,45 +248,28 @@ namespace Flair
 
             __syncthreads();
 
-            // Progress sample by sample
-            //int numSamples = 0;
-            //for (int sampleIdx = kBlockIdx; sampleIdx < ctx.batchSize; sampleIdx += PolicyT::kMiniBatchSize, ++numSamples)
+
+            // Copy input/target samples into memory
+            if (kThreadIdx < PolicyT::kWidth)
             {
-                // Copy input/target samples into memory
-                if (kThreadIdx < PolicyT::kWidth)
-                {
-                    const int indirect = kernelData.sampleIdxs[miniBatchOffset + kBlockIdx];
-                    ctx.input[kThreadIdx] = kernelData.inputVecs[indirect][kThreadIdx];
-                    ctx.target[kThreadIdx] = kernelData.targetVecs[indirect][kThreadIdx];
-                    ctx.state[kThreadIdx] = ctx.input[kThreadIdx];
-                }
-
-                // Feed forward pass
-                Forward(ctx);
-
-                /*__syncthreads();
-                if (debug)
-                {
-                    if (kKernelIdx == 0)
-                    {
-                        printf("State:\n");
-                        ctx.state.Print(false);
-                        printf("Target:\n");
-                        ctx.target.Print(false);
-                    }
-                }*/
-
-                // Calculate the loss and error for the last layer
-                ctx.loss = EstimateLoss(ctx);
-
-                // Back propagate error and accumulate gradients
-                Backward(ctx);
+                const int indirect = kernelData.sampleIdxs[miniBatchOffset + kBlockIdx];
+                ctx.input[kThreadIdx] = kernelData.inputVecs[indirect][kThreadIdx];
+                ctx.target[kThreadIdx] = kernelData.targetVecs[indirect][kThreadIdx];
+                ctx.state[kThreadIdx] = ctx.input[kThreadIdx];
             }
-            //numSamples = max(1, numSamples);
+
+            // Feed forward pass
+            Forward(ctx);
+
+            // Calculate the loss and error for the last layer
+            ctx.loss = EstimateLoss(ctx);
+
+            // Back propagate error and accumulate gradients
+            Backward(ctx);
 
             // Calculate the mean of the accumulated gradients and copy them back into global memory                
             __syncthreads();
-            auto& batchElement = kernelData.miniBatch[kBlockIdx];
+            auto& batchElement = kernelData.mlpData[kBlockIdx];
             for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
             {
                 batchElement.mlp.layers[layerIdx].w.Grad(kThreadIdx) = ctx.mlp.layers[layerIdx].w.Grad(kThreadIdx);// / numSamples;
@@ -285,75 +282,25 @@ namespace Flair
         }
 
         template<typename PolicyT>
-        __forceinline__ __host__ void EstimateGradients(KernelData<PolicyT> kernelData, const int miniBatchOffset, const int miniBatchSize)
+        __forceinline__ __host__ void EstimateGradients(TrainingKernelData<PolicyT> kernelData, const int miniBatchOffset, const int miniBatchSize)
         {
             constexpr int kThreadsPerBlock = PolicyT::kWidth * PolicyT::kWidth;
             AssertFmt(kThreadsPerBlock <= 1024, "Exceeded block limit of 1024 threads");
             EstimateGradientsKernel << < miniBatchSize, kThreadsPerBlock >> > (kernelData, miniBatchOffset);
-        }
+        }        
 
         /**
             Reduces accumulated gradients and loss values over the mini batch and stores them in the 0th layer
         **/
         template<typename PolicyT>
-        __global__ void InferKernel(KernelData<PolicyT> kernelData, const int miniBatchOffset)
-        {
-            __shared__ TrainingCtx<PolicyT> ctx;
-
-            // If the element of the mini-batch overruns the batch size
-            if (miniBatchOffset + kBlockIdx >= kernelData.batchSize) { return; }
-
-            // Copy MLP data out of global memory into shared memory. 
-            // NOTE: the data are pulled from the first copy in the mini-batch which serves as the master network for gradient descent
-            auto& masterMlp = kernelData.miniBatch[0].mlp;
-            for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
-            {
-                ctx.mlp.layers[layerIdx].w[kThreadIdx] = masterMlp.layers[layerIdx].w[kThreadIdx];
-                if (kThreadIdx < PolicyT::kWidth)
-                {
-                    ctx.mlp.layers[layerIdx].b[kThreadIdx] = masterMlp.layers[layerIdx].b[kThreadIdx];
-                }
-            }
-
-            // Copy input/target samples into memory
-            if (kThreadIdx < PolicyT::kWidth)
-            {
-                ctx.state[kThreadIdx] = kernelData.inputVecs[miniBatchOffset + kBlockIdx][kThreadIdx];
-            }
-
-            // Feed forward pass
-            Forward(ctx); 
-
-            // Calculate the loss and error for the last layer
-            //ctx.loss = EstimateLoss(ctx);
-           
-            __syncthreads();
-            if (kThreadIdx < PolicyT::kWidth)
-            {
-                kernelData.outputVecs[miniBatchOffset + kBlockIdx][kThreadIdx] = ctx.state[kThreadIdx];// -kernelData.targetVecs[miniBatchOffset + kBlockIdx][kThreadIdx];;
-            }
-        }
-
-        template<typename PolicyT>
-        __forceinline__ __host__ void Infer(KernelData<PolicyT> kernelData, const int miniBatchOffset, const int miniBatchSize)
-        {
-            constexpr int kThreadsPerBlock = PolicyT::kWidth * PolicyT::kWidth;
-            AssertFmt(kThreadsPerBlock <= 1024, "Exceeded block limit of 1024 threads");
-            InferKernel << < miniBatchSize, kThreadsPerBlock >> > (kernelData, miniBatchOffset);
-        }
-
-        /**
-            Reduces accumulated gradients and loss values over the mini batch and stores them in the 0th layer
-        **/
-        template<typename PolicyT>
-        __global__ void ReduceGradientsKernel(KernelData<PolicyT> kernelData, const int stride, const int miniBatchOffset, const int miniBatchSize)
+        __global__ void ReduceGradientsKernel(TrainingKernelData<PolicyT> kernelData, const int stride, const int miniBatchOffset, const int miniBatchSize)
         {            
             const int otherIdx = kBlockIdx * stride + (stride >> 1);
-            auto& thisElement = kernelData.miniBatch[kBlockIdx * stride];
+            auto& thisElement = kernelData.mlpData[kBlockIdx * stride];
 
             if (otherIdx < miniBatchSize && miniBatchOffset + otherIdx < kernelData.batchSize)
             {
-                const auto& otherElement = kernelData.miniBatch[otherIdx];
+                const auto& otherElement = kernelData.mlpData[otherIdx];
 
                 for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
                 {
@@ -394,7 +341,7 @@ namespace Flair
         }
 
         template<typename PolicyT>
-        __forceinline__ __host__ void ReduceGradients(KernelData<PolicyT> kernelData, const int miniBatchOffset, const int miniBatchSize)
+        __forceinline__ __host__ void ReduceGradients(TrainingKernelData<PolicyT> kernelData, const int miniBatchOffset, const int miniBatchSize)
         {
             if (miniBatchSize > 1)
             {
@@ -437,9 +384,9 @@ namespace Flair
         }
 
         template<typename PolicyT>
-        __global__ void DescendKernel(KernelData<PolicyT> kernelData)
+        __global__ void DescendKernel(TrainingKernelData<PolicyT> kernelData)
         {
-            auto& mlpLayer = kernelData.miniBatch[0].mlp.layers[kBlockIdx];
+            auto& mlpLayer = kernelData.mlpData[0].mlp.layers[kBlockIdx];
             auto& adamLayer = kernelData.optimiser->layers[kBlockIdx];
 
             if (kThreadIdx < PolicyT::kWidth * PolicyT::kWidth)
@@ -458,13 +405,13 @@ namespace Flair
 
             if (kKernelIdx == 0)
             {
-                *kernelData.loss = kernelData.miniBatch[0].loss;
+                *kernelData.loss = kernelData.mlpData[0].loss;
             }
         }
 
 
         template<typename PolicyT>
-        __forceinline__ __host__ void Descend(KernelData<PolicyT> kernelData)
+        __forceinline__ __host__ void Descend(TrainingKernelData<PolicyT> kernelData)
         {
             constexpr int kThreadsPerBlock = PolicyT::kWidth * (PolicyT::kWidth + 1);
             constexpr int kNumBlocks = PolicyT::kDepth;
@@ -473,20 +420,74 @@ namespace Flair
         }    
 
         template<typename PolicyT>
-        __global__ void PrepareNewEpochKernel(KernelData<PolicyT> kernelData)
+        __global__ void PrepareNewEpochKernel(TrainingKernelData<PolicyT> kernelData)
         {
             if (kThreadIdx == 0)
             {
                 kernelData.loss = 0;
             }
-            kernelData.miniBatch[kThreadIdx].loss = 0;
+            kernelData.mlpData[kThreadIdx].loss = 0;
         }
 
         template<typename PolicyT>
-        __forceinline__ __host__ void PrepareNewEpoch(KernelData<PolicyT> kernelData, const int miniBatchSize)
+        __forceinline__ __host__ void PrepareNewEpoch(TrainingKernelData<PolicyT> kernelData, const int miniBatchSize)
         {
             AssertFmt(miniBatchSize <= 1024, "Exceeded block limit of 1024 threads");
             PrepareNewEpochKernel << < 1, miniBatchSize >> > (kernelData);
+        }
+
+        /**
+            Runs an inference pass on the input data and stores it in the same array
+        **/
+        template<typename PolicyT>
+        __global__ void InferBatchKernel(InferenceKernelData<PolicyT> kernelData)
+        {
+            __shared__ InferenceCtx<PolicyT> ctx;
+
+            // If the element of the mini-batch overruns the batch size
+            if (kBlockIdx >= kernelData.batchSize) { return; }
+
+            // Copy MLP data out of global memory into shared memory. 
+            // NOTE: the data are pulled from the first copy in the mini-batch which serves as the master network for gradient descent
+            auto& masterMlp = kernelData.mlpData[0].mlp;
+            for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
+            {
+                ctx.mlp.layers[layerIdx].w[kThreadIdx] = masterMlp.layers[layerIdx].w[kThreadIdx];
+                if (kThreadIdx < PolicyT::kWidth)
+                {
+                    ctx.mlp.layers[layerIdx].b[kThreadIdx] = masterMlp.layers[layerIdx].b[kThreadIdx];
+                }
+            }
+
+            ctx.batchSize = kernelData.batchSize;
+
+            // Progress sample by sample
+            __syncthreads();
+            for (int sampleIdx = kBlockIdx; sampleIdx < ctx.batchSize; sampleIdx += PolicyT::kMiniBatchSize)
+            {
+                // Copy input/target samples into memory
+                if (kThreadIdx < PolicyT::kWidth)
+                {
+                    ctx.state[kThreadIdx] = kernelData.inOutVecs[sampleIdx][kThreadIdx];
+                }
+
+                // Feed forward pass
+                Forward(ctx);
+
+                __syncthreads();
+                if (kThreadIdx < PolicyT::kWidth)
+                {
+                    kernelData.inOutVecs[sampleIdx][kThreadIdx] = ctx.state[kThreadIdx];
+                }
+            }
+        }
+
+        template<typename PolicyT>
+        __forceinline__ __host__ void InferBatch(InferenceKernelData<PolicyT> kernelData)
+        {
+            constexpr int kThreadsPerBlock = PolicyT::kWidth * PolicyT::kWidth;
+            AssertFmt(kThreadsPerBlock <= 1024, "Exceeded block limit of 1024 threads");
+            InferBatchKernel << < PolicyT::kMiniBatchSize, kThreadsPerBlock >> > (kernelData);
         }
     }
 }

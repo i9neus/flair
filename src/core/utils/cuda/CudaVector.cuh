@@ -5,13 +5,15 @@
 #include <vector>
 
 namespace Flair
-{
+{  
     namespace Cuda
-    {        
+    {                
+        //template<typename OtherType, int OtherAlloc> std::vector<OtherType>& operator<<=(std::vector<OtherType>&, Vector<OtherType, OtherAlloc>&);
+
         template<typename Type, int Alloc>
         class Vector
         {
-            friend std::vector<Type>& operator<<=(std::vector<Type>&, Vector<Type, Alloc>&);
+            template<typename OtherType, int OtherAlloc> friend std::vector<OtherType>& operator<<=(std::vector<OtherType>&, Vector<OtherType, OtherAlloc>&);
 
         private:
             std::vector<Type>   m_hostData;
@@ -161,23 +163,31 @@ namespace Flair
             Vector<Type, Alloc> temp = std::move(a);
             a = std::move(b);
             b = std::move(temp);
+        }  
+
+        // Download from device and copy to host memory
+        template<typename Type, int Alloc>
+        __host__ static std::vector<Type> DownloadVec(Cuda::Vector<Type, Alloc>& rhs)
+        {
+            std::vector<Type> lhs;
+            return lhs;
         }
 
         // Download from device and copy to host memory
         template<typename Type, int Alloc>
         __host__ static std::vector<Type>& operator<<=(std::vector<Type>& lhs, Vector<Type, Alloc>& rhs)
         {
-            lhs.resize(rhs.m_hostData.size());
+            lhs.resize(rhs.Size());
             if (!lhs.empty())
             {
                 if (Alloc == kCudaMemMirrored)
                 {
-                    lhs.Download();
-                    memcpy(lhs.data(), rhs.m_hostData.data(), sizeof(Type) * lhs.size());
+                    rhs.Download();
+                    memcpy(lhs.data(), rhs.m_hostData.data(), sizeof(Type) * rhs.Size());
                 }
                 else
                 {
-                    IsOk(cudaMemcpy(lhs.data(), rhs.cu_deviceData, sizeof(Type) * lhs.size(), cudaMemcpyHostToDevice));
+                    IsOk(cudaMemcpy(lhs.data(), rhs.cu_deviceData, sizeof(Type) * rhs.Size(), cudaMemcpyDeviceToHost));
                 }
             }
             return lhs;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../Codec.h"
-#include "../image/Operators.h"
+#include "../image/ImageOps.h"
 #include <array>
 
 namespace Flair

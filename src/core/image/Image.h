@@ -10,12 +10,12 @@
 
 namespace Flair
 {   
-    struct ImageRegion
+    struct ImageRect
     {
         int x0, y0, x1, y1;
 
-        ImageRegion() : x0(std::numeric_limits<int>::max()), y0(std::numeric_limits<int>::max()), x1(std::numeric_limits<int>::min()), y1(std::numeric_limits<int>::min()) {}
-        ImageRegion(int _x0, int _y0, int _x1, int _y1) : x0(_x0), y0(_y0), x1(_x1), y1(_y1) {}
+        ImageRect() : x0(std::numeric_limits<int>::max()), y0(std::numeric_limits<int>::max()), x1(std::numeric_limits<int>::min()), y1(std::numeric_limits<int>::min()) {}
+        ImageRect(int _x0, int _y0, int _x1, int _y1) : x0(_x0), y0(_y0), x1(_x1), y1(_y1) {}
 
         inline int Area() const { return (x1 - x0) * (y1 - y0); }
         inline int Width() const { return x1 - x0; }
@@ -23,6 +23,11 @@ namespace Flair
         inline operator bool() const { return x1 > x0 && y1 > y0; }
         inline bool Contains(const int x, const int y) const { return x >= x0 && x < x1&& y >= y0 && y < y1; }
     };
+
+    inline ImageRect Intersection(const ImageRect& a, const ImageRect& b)
+    {
+        return ImageRect(std::max(a.x0, b.x0), std::max(a.y0, b.y0), std::min(a.x1, b.x1), std::min(a.y1, b.y1));
+    }
 
     template<typename Type, int Channels>
     class Image
@@ -74,6 +79,9 @@ namespace Flair
             m_data.resize(m_area * Channels, Type(0));
         }
 
+        template<int OtherChannels>
+        inline void Resize(const Image<Type, OtherChannels>& other) { Resize(other.Width(), other.Height()); }
+
         Image<Type, 1> ExtractChannel(const int chnlIdx) const
         {
             Image<Type, 1> chnlData(m_width, m_height);
@@ -104,9 +112,7 @@ namespace Flair
                 m_data[i * Channels + chnlIdx] = chnlData[i];
             }
         }
-
-        inline void Resize(const Image& other) { Resize(other.Width(), other.Height()); }
-
+   
         operator bool() const { return !m_data.empty(); }
         bool Contains(const int x, const int y) const { return x >= 0 && x < m_width&& y >= 0 && y < m_height; }
 
@@ -114,6 +120,7 @@ namespace Flair
         inline int Height() const { return m_height; }
         inline int Area() const { return m_area; }
         inline int Size() const { return m_area * Channels; }
+        inline ImageRect Rect() const { return ImageRect(0, 0, m_width, m_height); }
 
         inline Type* operator()(const int x, const int y) { return &m_data[(y * m_width + x) * Channels]; }
         inline const Type* operator()(const int x, const int y) const { return &m_data[(y * m_width + x) * Channels]; }
@@ -238,10 +245,10 @@ namespace Flair
 #endif
         }
 
-        void ParallelMap(ParallelMapFunctor setPixel, ImageRegion region = ImageRegion(), const int maxThreads = 16)
+        void ParallelMap(ParallelMapFunctor setPixel, ImageRect region = ImageRect(), const int maxThreads = 16)
         {
             // If no region was specified, reinitialise it to the entire image
-            if (!region) { region = ImageRegion(0, 0, m_width, m_height); }
+            if (!region) { region = ImageRect(0, 0, m_width, m_height); }
 
 #if defined(FLAIR_DISABLE_MULTITHREADING)
 
@@ -270,10 +277,10 @@ namespace Flair
 #endif
         }
 
-        void Map(MapFunctor setPixel, ImageRegion region = ImageRegion(), const int maxThreads = 16)
+        void Map(MapFunctor setPixel, ImageRect region = ImageRect(), const int maxThreads = 16)
         {
             // If no region was specified, reinitialise it to the entire image
-            if (!region) { region = ImageRegion(0, 0, m_width, m_height); }
+            if (!region) { region = ImageRect(0, 0, m_width, m_height); }
 
             for (int y = region.y0; y < region.y1; ++y)
             {
@@ -285,7 +292,7 @@ namespace Flair
         }
 
     private:
-        void MapThread(const ImageRegion& region, const int startPixel, const int endPixel, const int threadIdx, ParallelMapFunctor setPixel)
+        void MapThread(const ImageRect& region, const int startPixel, const int endPixel, const int threadIdx, ParallelMapFunctor setPixel)
         {
             for (int i = startPixel; i < endPixel; ++i)
             {
