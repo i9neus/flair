@@ -38,20 +38,23 @@ namespace Flair
 
             printf_red("TrainingCtx: %i bytes\n", sizeof(TrainingCtx<Policy>));
 
-            UniformDistribution rng(0, 1, 10);
-            m_deviceModelData.Resize(sizeof(MLPData<Policy>) * kMiniBatchSize);
-            Cuda::Object<float> deviceLoss;
-            Cuda::Object<Optimiser> deviceOptimiser;
+            Cuda::Vector<MLPMiniBatchData<Policy>, kCudaMemDevice> deviceMiniBatchData(kMiniBatchSize);
             Cuda::Vector<Sample, kCudaMemDevice> deviceInputSamples(inputSamples.size());
             Cuda::Vector<Sample, kCudaMemMirrored> deviceOutputSamples(inputSamples.size());
             Cuda::Vector<Sample, kCudaMemDevice> deviceTargetSamples(inputSamples.size());
+            Cuda::Object<float> deviceLoss;
 
             // Determininstically initialise the mini-batch weights and the optimiser 
-            MLPData<Policy>& masterModel = *reinterpret_cast<MLPData<Policy>*>(&m_deviceModelData[0]);
-            masterModel.mlp.Initialise(NormalRandomDistribution(0, 0.5f, std::hash<int>{}(0)));
+            m_deviceModelData.Resize(sizeof(MLPModel<Policy, true>));
+            MLPModel<Policy, true>& masterModel = *reinterpret_cast<MLPModel<Policy, true>*>(&m_deviceModelData[0]);
+            masterModel.Initialise(NormalRandomDistribution(0, 0.5f, std::hash<int>{}(0)));
+
+            // Create and initialise the optimiser
+            using Optimiser = SequentialLayers<kWidth, kDepth, true>;
+            Cuda::Object<Optimiser> deviceOptimiser;
             deviceOptimiser->Initialise(Zeros());           
-            m_deviceModelData.Upload();
             deviceOptimiser.Upload();
+            m_deviceModelData.Upload();
 
             // Upload the samples
             deviceInputSamples <<= inputSamples;
@@ -63,7 +66,8 @@ namespace Flair
 
             // Initialise the kernel data structure
             TrainingKernelData<Policy> kernelData;
-            kernelData.mlpData = reinterpret_cast<MLPData<Policy>*>(m_deviceModelData.GetDeviceData());
+            kernelData.mlpModelData = reinterpret_cast<MLPModel<Policy, true>*>(m_deviceModelData.GetDeviceData());
+            kernelData.mlpMiniBatchData = deviceMiniBatchData.GetDeviceData();
             kernelData.inputVecs = deviceInputSamples.GetDeviceData();
             kernelData.outputVecs = deviceOutputSamples.GetDeviceData();
             kernelData.targetVecs = deviceTargetSamples.GetDeviceData();
@@ -178,10 +182,9 @@ namespace Flair
             
             // Initialise the kernel data structure
             InferenceKernelData<Policy> kernelData;
-            kernelData.mlpData = reinterpret_cast<MLPData<Policy>*>(m_deviceModelData.GetDeviceData());
+            kernelData.mlpModelData = reinterpret_cast<MLPModel<Policy, true>*>(m_deviceModelData.GetDeviceData());
             
             std::vector<Sample> hostSamples;
-
             int sampleIdx = 0;
             while (readBatch(hostSamples, sampleIdx) && !hostSamples.empty())
             {

@@ -41,32 +41,35 @@ namespace Flair
             static constexpr float kLearningRate = float(LearningRateT::num) / float(LearningRateT::den);
         };
 
+        template<typename PolicyT, bool HasGrad> using MLPModel = SequentialLayers<PolicyT::kWidth, PolicyT::kDepth, HasGrad>;
+
         template<typename PolicyT>
-        struct MLPData
+        struct MLPMiniBatchData
         {
-            SequentialLayers<PolicyT::kWidth, PolicyT::kDepth>  mlp;
-            float                                               loss;
+            MLPModel<PolicyT, false>   mlp;
+            float                      loss;
         };
         
         template<typename PolicyT>
         struct TrainingKernelData
         {           
-            MLPData<PolicyT>*                                       mlpData = nullptr;
-            Tensor1D<PolicyT::kWidth, false>*                       inputVecs = nullptr;
-            Tensor1D<PolicyT::kWidth, false>*                       targetVecs = nullptr;
-            Tensor1D<PolicyT::kWidth, false>*                       outputVecs = nullptr;
-            SequentialLayers<PolicyT::kWidth, PolicyT::kDepth>*     optimiser = nullptr;
-            int*                                                    sampleIdxs = nullptr;
-            float*                                                  loss = nullptr;
-            int                                                     batchSize = 0;
+            MLPModel<PolicyT, true>*            mlpModelData = nullptr;
+            MLPMiniBatchData<PolicyT>*          mlpMiniBatchData = nullptr;
+            Tensor1D<PolicyT::kWidth, false>*   inputVecs = nullptr;
+            Tensor1D<PolicyT::kWidth, false>*   targetVecs = nullptr;
+            Tensor1D<PolicyT::kWidth, false>*   outputVecs = nullptr;
+            MLPModel<PolicyT, true>*            optimiser = nullptr;
+            int*                                sampleIdxs = nullptr;
+            float*                              loss = nullptr;
+            int                                 batchSize = 0;
         };
 
         template<typename PolicyT>
         struct InferenceKernelData
         {           
-            MLPData<PolicyT>*                                       mlpData = nullptr;
-            Tensor1D<PolicyT::kWidth, false>*                       inOutVecs = nullptr;
-            int                                                     batchSize = 0;
+            MLPModel<PolicyT, true>*            mlpModelData = nullptr;
+            Tensor1D<PolicyT::kWidth, false>*   inOutVecs = nullptr;
+            int                                 batchSize = 0;
         };
 
         template<typename PolicyT>
@@ -78,15 +81,12 @@ namespace Flair
             __device__ TrainingCtx() {}
             __device__ TrainingCtx(const TrainingCtx&) = delete;
 
-            SequentialLayers<kWidth, kDepth> mlp;                        // The model weights, biases and gradients
-            Tensor1D<kWidth, false>         input;                      // The input sample for this eval
-            Tensor1D<kWidth, false>         target;                     // The target sample for this eval
-            union
-            {
-                Tensor1D<kWidth, false>     state;                 // The intermediate state of the activations in the forward pass
-                Tensor1D<kWidth, false>     error;                 // The propagated error during the backward pass
-            };
-            Tensor1D<kWidth, false>         acts[kDepth];               // Cached per-layer activations required during the forward/backward passes
+            MLPModel<PolicyT, false>                mlp;                        // The model weights, biases and gradients
+            Tensor1D<kWidth, false>                 input;                      // The input sample for this eval
+            Tensor1D<kWidth, false>                 target;                     // The target sample for this eval
+            Tensor1D<kWidth, false>                 state;                      // The intermediate state of the activations in the forward/backward pass
+            Tensor1D<kWidth, false>                 error;                      // The propagated error during the backward pass
+            Tensor1D<kWidth, false>                 acts[kDepth];               // Cached per-layer activations required during the forward/backward passes
             union
             {
                 float                   scratch2D[kWidth][kWidth];    // Scratch memory for accumulating values during tensor multiplication
@@ -103,7 +103,7 @@ namespace Flair
 
             __host__ __device__ InferenceCtx() {}
 
-            SequentialLayers<kWidth, kDepth>    mlp;
+            MLPModel<PolicyT, false>            mlp;
             Tensor1D<kWidth, false>             state;
             float                               scratch2D[kWidth][kWidth];
             int                                 batchSize;
@@ -159,23 +159,24 @@ namespace Flair
                 {
                     // Derivative of activation at this layer (except last layer)
                     ctx.error[kThreadIdx] *= Ctx::Policy::Activation::dF(ctx.acts[layerIdx][kThreadIdx]);
-                }
+                }  
 
-                // Accumulate derivative of the weights...
+                // Backpropagate the error by the transpose of the weight matrix and cache as a temporary state
                 __syncthreads();
                 auto& layer = ctx.mlp.layers[layerIdx];
-                layer.w.Grad(colIdx, rowIdx) += ctx.error[rowIdx] * ((layerIdx == 0) ? ctx.input[colIdx] : ctx.acts[layerIdx - 1][colIdx]);
+                if (layerIdx != 0) { MulT(layer.w, ctx.error, ctx.state, ctx.scratch2D); }
+
+                // Repurpose the memory used to store the weights with the gradients of the weights
+                __syncthreads();
+                layer.w(colIdx, rowIdx) = ctx.error[rowIdx] * ((layerIdx == 0) ? ctx.input[colIdx] : ctx.acts[layerIdx - 1][colIdx]);
                 if (kThreadIdx < Ctx::kWidth)
                 {
-                    layer.b.Grad(kThreadIdx) += ctx.error[kThreadIdx];
+                    layer.b[kThreadIdx] = ctx.error[kThreadIdx];
                 }
 
+                // Update the error to its backpropagated derivative
                 __syncthreads();
-                if (layerIdx != 0)
-                {
-                    // Multiply the error by the transpose of the weight matrix                 
-                    MulT(ctx.mlp.layers[layerIdx].w, ctx.error, ctx.error, ctx.scratch2D);
-                }
+                if (kThreadIdx < Ctx::kWidth) { ctx.error[kThreadIdx] = ctx.state[kThreadIdx]; }
             }
         }
 
@@ -225,17 +226,14 @@ namespace Flair
         template<typename PolicyT>
         __global__ void EstimateGradientsKernel(TrainingKernelData<PolicyT> kernelData, const int miniBatchOffset)
         {
-            __shared__ TrainingCtx<PolicyT> ctx;
-
-            // Clear the gradients ready for accumulation
-            ctx.mlp.ZeroGrad();
+            __shared__ TrainingCtx<PolicyT> ctx;            
 
             // If the element of the mini-batch overruns the batch size
             if (miniBatchOffset + kBlockIdx >= kernelData.batchSize) { return; }
             
             // Copy MLP data out of global memory into shared memory. 
             // NOTE: the data are pulled from the first copy in the mini-batch which serves as the master network for gradient descent
-            auto& masterMlp = kernelData.mlpData[0].mlp;
+            auto& masterMlp = *kernelData.mlpModelData;
             for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
             {
                 ctx.mlp.layers[layerIdx].w[kThreadIdx] = masterMlp.layers[layerIdx].w[kThreadIdx];
@@ -247,7 +245,6 @@ namespace Flair
             if (kThreadIdx == 0) { ctx.loss = 0; }
 
             __syncthreads();
-
 
             // Copy input/target samples into memory
             if (kThreadIdx < PolicyT::kWidth)
@@ -269,16 +266,16 @@ namespace Flair
 
             // Calculate the mean of the accumulated gradients and copy them back into global memory                
             __syncthreads();
-            auto& batchElement = kernelData.mlpData[kBlockIdx];
+            auto& batchElement = kernelData.mlpMiniBatchData[kBlockIdx];
             for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
             {
-                batchElement.mlp.layers[layerIdx].w.Grad(kThreadIdx) = ctx.mlp.layers[layerIdx].w.Grad(kThreadIdx);// / numSamples;
+                batchElement.mlp.layers[layerIdx].w[kThreadIdx] = ctx.mlp.layers[layerIdx].w[kThreadIdx];
                 if (kThreadIdx < PolicyT::kWidth)
                 {
-                    batchElement.mlp.layers[layerIdx].b.Grad(kThreadIdx) = ctx.mlp.layers[layerIdx].b.Grad(kThreadIdx);// / numSamples;
+                    batchElement.mlp.layers[layerIdx].b[kThreadIdx] = ctx.mlp.layers[layerIdx].b[kThreadIdx];//
                 }
             }
-            if (kThreadIdx == 0) { batchElement.loss = ctx.loss/* / numSamples*/; };
+            if (kThreadIdx == 0) { batchElement.loss = ctx.loss; };
         }
 
         template<typename PolicyT>
@@ -296,18 +293,18 @@ namespace Flair
         __global__ void ReduceGradientsKernel(TrainingKernelData<PolicyT> kernelData, const int stride, const int miniBatchOffset, const int miniBatchSize)
         {            
             const int otherIdx = kBlockIdx * stride + (stride >> 1);
-            auto& thisElement = kernelData.mlpData[kBlockIdx * stride];
+            auto& thisElement = kernelData.mlpMiniBatchData[kBlockIdx * stride];
 
             if (otherIdx < miniBatchSize && miniBatchOffset + otherIdx < kernelData.batchSize)
             {
-                const auto& otherElement = kernelData.mlpData[otherIdx];
+                const auto& otherElement = kernelData.mlpMiniBatchData[otherIdx];
 
                 for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
                 {
-                    thisElement.mlp.layers[layerIdx].w.Grad(kThreadIdx) += otherElement.mlp.layers[layerIdx].w.Grad(kThreadIdx);
+                    thisElement.mlp.layers[layerIdx].w[kThreadIdx] += otherElement.mlp.layers[layerIdx].w[kThreadIdx];
                     if (kThreadIdx < PolicyT::kWidth)
                     {
-                        thisElement.mlp.layers[layerIdx].b.Grad(kThreadIdx) += otherElement.mlp.layers[layerIdx].b.Grad(kThreadIdx);
+                        thisElement.mlp.layers[layerIdx].b[kThreadIdx] += otherElement.mlp.layers[layerIdx].b[kThreadIdx];
                     }
                 }
                 if (kThreadIdx == 0)
@@ -324,18 +321,16 @@ namespace Flair
                 const int N = min(miniBatchSize, kernelData.batchSize - miniBatchOffset);
                 for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
                 {
-                    thisElement.mlp.layers[layerIdx].w.Grad(kThreadIdx) /= N;
+                    auto& gradLayer = kernelData.mlpModelData->layers[layerIdx];
+                    gradLayer.w.Grad(kThreadIdx) = thisElement.mlp.layers[layerIdx].w[kThreadIdx] / N;
                     if (kThreadIdx < PolicyT::kWidth)
                     {
-                        thisElement.mlp.layers[layerIdx].b.Grad(kThreadIdx) /= N;
+                        gradLayer.b.Grad(kThreadIdx) = thisElement.mlp.layers[layerIdx].b[kThreadIdx] / N;
                     }
                 }
                 if (kThreadIdx == 0)
                 {
                     thisElement.loss /= N;
-                    
-                    //thisElement.mlp.layers[2].b.Print(true);
-                    //printf("\n");
                 }
             }
         }
@@ -386,7 +381,7 @@ namespace Flair
         template<typename PolicyT>
         __global__ void DescendKernel(TrainingKernelData<PolicyT> kernelData)
         {
-            auto& mlpLayer = kernelData.mlpData[0].mlp.layers[kBlockIdx];
+            auto& mlpLayer = kernelData.mlpModelData->layers[kBlockIdx];
             auto& adamLayer = kernelData.optimiser->layers[kBlockIdx];
 
             if (kThreadIdx < PolicyT::kWidth * PolicyT::kWidth)
@@ -405,7 +400,7 @@ namespace Flair
 
             if (kKernelIdx == 0)
             {
-                *kernelData.loss = kernelData.mlpData[0].loss;
+                *kernelData.loss = kernelData.mlpMiniBatchData[0].loss;
             }
         }
 
@@ -422,11 +417,8 @@ namespace Flair
         template<typename PolicyT>
         __global__ void PrepareNewEpochKernel(TrainingKernelData<PolicyT> kernelData)
         {
-            if (kThreadIdx == 0)
-            {
-                kernelData.loss = 0;
-            }
-            kernelData.mlpData[kThreadIdx].loss = 0;
+            kernelData.loss = 0;
+            kernelData.mlpMiniBatchData[kThreadIdx].loss = 0;
         }
 
         template<typename PolicyT>
@@ -449,7 +441,7 @@ namespace Flair
 
             // Copy MLP data out of global memory into shared memory. 
             // NOTE: the data are pulled from the first copy in the mini-batch which serves as the master network for gradient descent
-            auto& masterMlp = kernelData.mlpData[0].mlp;
+            auto& masterMlp = *kernelData.mlpModelData;
             for (int layerIdx = 0; layerIdx < PolicyT::kDepth; ++layerIdx)
             {
                 ctx.mlp.layers[layerIdx].w[kThreadIdx] = masterMlp.layers[layerIdx].w[kThreadIdx];

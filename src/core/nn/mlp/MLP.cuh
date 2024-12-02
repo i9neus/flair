@@ -12,7 +12,7 @@ namespace Flair
 {
     namespace NN
     {
-        template<int, int> struct SequentialLayers;
+        template<int, int, bool> struct SequentialLayers;
 
         class MLP
         {
@@ -26,10 +26,7 @@ namespace Flair
             // The size of the mini batch
             static constexpr int kMiniBatchSize = 64;
 
-            using Model = SequentialLayers<kWidth, kDepth>;
             using Sample = Tensor1D<kWidth, false>;
-            using Optimiser = SequentialLayers<kWidth, kDepth>;
-
             using ReadBatchFunctor = std::function<bool(std::vector<Sample>&, const int)>;
             using WriteBatchFunctor = std::function<void(const std::vector<Sample>&, const int)>;
 

@@ -9,12 +9,12 @@ namespace Flair
     namespace NN
     {
         // Fully-connected layer with weights and biases
-        template<int N>
+        template<int N, bool HasGrad>
         struct Linear
         {
         public:
-            Tensor2D<N, N, true>   w;  
-            Tensor1D<N, true>      b; 
+            Tensor2D<N, N, HasGrad>   w; 
+            Tensor1D<N, HasGrad>      b; 
 
         public:
             __inline__ __host__ __device__ void ZeroGrad()
@@ -24,11 +24,11 @@ namespace Flair
             }
         };
 
-        template<int Width, int Depth>
+        template<int Width, int Depth, bool HasGrad>
         struct SequentialLayers
         {
         public:
-            Linear<Width> layers[Depth];       // Fully-connected layer weights and biases
+            Linear<Width, HasGrad> layers[Depth];       // Fully-connected layer weights and biases
 
         public:
             template<typename RNG>
