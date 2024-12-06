@@ -3,8 +3,9 @@
 #include "core/utils/HighResTimer.h"
 #include "../ContinuousRandomVariable.cuh"
 #include "../Permute.cuh"
-#include "MLPKernels.cuh"
-#include "../Modules.cuh"
+#include "Training.cuh"
+#include "Inference.cuh"
+#include "Optimiser.cuh"
 #include <fstream>
 #include <thread>
 #include <chrono>
@@ -13,6 +14,22 @@ namespace Flair
 {
     namespace NN
     {
+        // The size of the mini batch
+        static constexpr int kMiniBatchSize = 64;
+
+        using LearningRate = std::ratio<1, 1000>;
+
+        using ActivationFunction = Activation::LeakyReLU; 
+
+        using LossFunction = Loss::L1;
+
+        using OptimiserFunction = Optimiser::Adam<LearningRate>;
+        //using OptimiserFunction = Optimiser::SGD<LearningRate>;
+
+        using Model = LinearSequential<Linear<16, 16>, Linear<16, 16>, Linear<16, 16>>;
+
+        using Policy = MLPPolicy<Model, HyperParameters<kMiniBatchSize, ActivationFunction, LossFunction, OptimiserFunction>>;
+        
         MLP::MLP()
         {
             Initialise();
@@ -22,39 +39,29 @@ namespace Flair
         {
         }        
 
-        void MLP::Train(const std::vector<Sample>& inputSamples, const std::vector<Sample>& targetSamples)
+        void MLP::Train(const std::vector<InputSample>& inputSamples, const std::vector<OutputSample>& targetSamples)
         {
             Assert(inputSamples.size() == targetSamples.size());
-            
-            using ActivationFunction = Activation::LeakyReLU;
-            using LossFunction = Loss::L1;
-            using LearningRate = std::ratio<1, 100>;
-            
-            // Define the model policy
-            using Policy = MLPTrainingPolicy<kWidth, kDepth, kMiniBatchSize, ActivationFunction, LossFunction, LearningRate>;
-            Policy::AssertValid();
             
             RunTensorTests(false);
 
             printf_red("TrainingCtx: %i bytes\n", sizeof(TrainingCtx<Policy>));
 
-            Cuda::Vector<MLPMiniBatchData<Policy>, kCudaMemDevice> deviceMiniBatchData(kMiniBatchSize);
-            Cuda::Vector<Sample, kCudaMemDevice> deviceInputSamples(inputSamples.size());
-            Cuda::Vector<Sample, kCudaMemMirrored> deviceOutputSamples(inputSamples.size());
-            Cuda::Vector<Sample, kCudaMemDevice> deviceTargetSamples(inputSamples.size());
-            Cuda::Object<float> deviceLoss;
+            Cuda::Vector<float> deviceGradData(Policy::Hyper::kMiniBatchSize * Policy::Model::kNumParams);
+            Cuda::Vector<InputSample> deviceInputSamples(inputSamples.size());
+            Cuda::Vector<OutputSample> deviceTargetSamples(inputSamples.size());
+            Cuda::Vector<float> deviceSampleLosses(Policy::Hyper::kMiniBatchSize);
+            Cuda::Object<float> deviceMiniBatchLoss;
 
             // Determininstically initialise the mini-batch weights and the optimiser 
-            m_deviceModelData.Resize(sizeof(MLPModel<Policy, true>));
-            MLPModel<Policy, true>& masterModel = *reinterpret_cast<MLPModel<Policy, true>*>(&m_deviceModelData[0]);
-            masterModel.Initialise(NormalRandomDistribution(0, 0.5f, std::hash<int>{}(0)));
+            std::vector<float> hostModelData(Model::kNumParams);
+            auto rng = NormalRandomDistribution(0, 0.5f, std::hash<int>{}(0));
+            Model::Initialise(hostModelData, rng);
+            m_deviceModelData <<= hostModelData;
 
             // Create and initialise the optimiser
-            using Optimiser = SequentialLayers<kWidth, kDepth, true>;
-            Cuda::Object<Optimiser> deviceOptimiser;
-            deviceOptimiser->Initialise(Zeros());           
-            deviceOptimiser.Upload();
-            m_deviceModelData.Upload();
+            Cuda::Vector<float> deviceOptimiserData(Policy::Model::kNumParams * 2);
+            deviceOptimiserData.Fill(0);
 
             // Upload the samples
             deviceInputSamples <<= inputSamples;
@@ -66,20 +73,21 @@ namespace Flair
 
             // Initialise the kernel data structure
             TrainingKernelData<Policy> kernelData;
-            kernelData.mlpModelData = reinterpret_cast<MLPModel<Policy, true>*>(m_deviceModelData.GetDeviceData());
-            kernelData.mlpMiniBatchData = deviceMiniBatchData.GetDeviceData();
-            kernelData.inputVecs = deviceInputSamples.GetDeviceData();
-            kernelData.outputVecs = deviceOutputSamples.GetDeviceData();
-            kernelData.targetVecs = deviceTargetSamples.GetDeviceData();
-            kernelData.optimiser = deviceOptimiser.GetDeviceData();
+            kernelData.mlpModelData = m_deviceModelData.GetDeviceData();
+            kernelData.mlpGradData = deviceGradData.GetDeviceData();
+            kernelData.inputSamples = deviceInputSamples.GetDeviceData();
+            kernelData.targetSamples= deviceTargetSamples.GetDeviceData();
+            kernelData.optimiserData = deviceOptimiserData.GetDeviceData();
             kernelData.sampleIdxs = sampleIdxs.GetDeviceData();
-            kernelData.loss = deviceLoss.GetDeviceData();
+            kernelData.sampleLosses = deviceSampleLosses.GetDeviceData();
+            kernelData.miniBatchLoss = deviceMiniBatchLoss.GetDeviceData();
             kernelData.batchSize = inputSamples.size();
 
             constexpr int kMaxEpochs = 200;
-            constexpr int kMaxMiniBatches = 2000000;
+            constexpr int kMaxMiniBatches = std::numeric_limits<int>::max();
             int miniBatchIdx = 0;
-            HighResTimer timer;
+            HighResTimer kernelTimer, lossTimer;
+            double totalTime = 0;
 
             std::vector<std::pair<int, float>> epochLoss;
             std::vector<float> miniBatchLoss;
@@ -88,77 +96,56 @@ namespace Flair
             (*targetSamples)[0].Print();*/
 
             for (int epochIdx = 0; epochIdx < kMaxEpochs && miniBatchIdx < kMaxMiniBatches; ++epochIdx)
-            {                                                
-                const float miniBatchSize = Policy::kMiniBatchSize;// (miniBatchIdx > 5000) ? Policy::kMiniBatchSize : 1;
-                
+            {                                                                
                 // Reset the kernel data (loss values, etc.) for the new epoch
-                PrepareNewEpoch(kernelData, miniBatchSize);
-                
-                float meanLoss = 0;
-                for (int sampleIdx = 0; sampleIdx < kernelData.batchSize; sampleIdx += miniBatchSize, ++miniBatchIdx)
+                PrepareNewEpoch(kernelData);
+
+                float meanLoss = 0;                
+                for (int sampleIdx = 0; sampleIdx < kernelData.batchSize && miniBatchIdx < kMaxMiniBatches; sampleIdx += Policy::Hyper::kMiniBatchSize, ++miniBatchIdx)
                 {
+                    kernelTimer.Reset();
+
                     // Estimate the gradients
-                    EstimateGradients(kernelData, sampleIdx, miniBatchSize);
+                    EstimateGradients(kernelData, sampleIdx);
 
                     // Reduce gradients 
-                    ReduceGradients(kernelData, sampleIdx, miniBatchSize);
+                    ReduceGradients(kernelData, sampleIdx);      
 
                     // Optimiser step
                     Descend(kernelData);
 
                     IsOk(cudaDeviceSynchronize());
+                    totalTime += kernelTimer.Get();
 
-                    const float loss = deviceLoss.Download();
+                    const float loss = deviceMiniBatchLoss.Download();
                     miniBatchLoss.emplace_back(loss);
                     if (miniBatchIdx == 0) { epochLoss.emplace_back(0, loss); }
+                    //printf("%i %f\n", miniBatchIdx, loss);
                     meanLoss += loss;
-                    //printf("Epoch %i: L1 = %.10f\n", epochIdx, meanLoss);
-                    //file << tfm::format("%i %f ", miniBatchIdx, meanLoss);
-
-                    /*auto& v = deviceOutputSamples.Download();
-                    printf("%i: ", miniBatchIdx);
-                    for (int i = 0; i < 16; ++i)
-                    {
-                        printf("%f ", v[0][i]);
-                    }
-                    printf("\n");*/
-
-                    //using namespace std::chrono_literals;
-                    //std::this_thread::sleep_for(100ms);
                 }
 
                 // Record the loss
-                meanLoss /= std::ceil(kernelData.batchSize / float(miniBatchSize));
+                meanLoss /= std::ceil(kernelData.batchSize / float(Policy::Hyper::kMiniBatchSize));
                 epochLoss.emplace_back(miniBatchIdx, meanLoss);
 
                 //meanLoss = deviceLoss.Download();// / std::ceil(kernelData.batchSize / float(Policy::kMiniBatchSize));
-                if (timer.Get() > 0.5)
+                if (lossTimer.Get() > 1. / 3)
                 { 
                     printf("Epoch %i: L1 = %.10f\n", epochIdx, meanLoss); 
-                    timer.Reset();
-
-                    //deviceMiniBatch.Download();
-                    //deviceMiniBatch[0].mlp.layers[2].w.Print(true);
-                }
-
-                /*if (epochIdx == kMaxEpochs - 1)
-                {
-                    deviceMiniBatch.Download();
-                    for (int i = 0; i < deviceMiniBatch.Size(); ++i)
-                    {
-                        printf("------------------------------ %i -------------------------------\n", i);
-                        for (auto& layer : deviceMiniBatch[i].mlp.layers)
-                        {
-                            layer.w.Print(true);
-                            layer.b.Print(true);
-                        }
-                        printf("\n\n");
-                    }
-                }*/
+                    lossTimer.Reset();
+                }              
+                IsOk(cudaDeviceSynchronize());
 
                 // Shuffle the indirection indices
                 sampleIdxs.Shuffle();
+
+                /*std::vector<int>& idxs = sampleIdxs.GetHostData();
+                printf("%i: ", epochIdx);
+                for (auto& i : idxs) { printf("%i ", i); }
+                printf("\n");*/
             }
+
+            printf_green("Total time: %.2f\n", totalTime);
 
             std::ofstream file("C:/Unity/SyntheticGS/Assets/HDRI/Loss.dat", std::ios::out);
             for(int i = 0; i < miniBatchLoss.size(); ++i)
@@ -174,30 +161,35 @@ namespace Flair
         }
 
         void MLP::Infer(ReadBatchFunctor readBatch, WriteBatchFunctor writeBatch)
-        {
-            // Define the model policy
-            using Policy = MLPInferencePolicy<kWidth, kDepth, kMiniBatchSize, Activation::LeakyReLU>;
-            
-            Cuda::Vector<Sample, kCudaMemDevice> deviceSamples(Policy::kMiniBatchSize);
+        {            
+            Cuda::Vector<InputSample> deviceInputSamples(Policy::Hyper::kMiniBatchSize);
+            Cuda::Vector<OutputSample> deviceOutputSamples(Policy::Hyper::kMiniBatchSize);
             
             // Initialise the kernel data structure
             InferenceKernelData<Policy> kernelData;
-            kernelData.mlpModelData = reinterpret_cast<MLPModel<Policy, true>*>(m_deviceModelData.GetDeviceData());
-            
-            std::vector<Sample> hostSamples;
+            kernelData.mlpModelData = m_deviceModelData.GetDeviceData();
+
+            HighResTimer timer;
+            std::vector<InputSample> hostInputSamples;
+            std::vector<OutputSample> hostOutputSamples;
             int sampleIdx = 0;
-            while (readBatch(hostSamples, sampleIdx) && !hostSamples.empty())
+            while (readBatch(hostInputSamples, sampleIdx) && !hostInputSamples.empty())
             {
-                deviceSamples <<= hostSamples;
-                kernelData.inOutVecs = deviceSamples.GetDeviceData();
-                kernelData.batchSize = hostSamples.size();
+                deviceOutputSamples.Resize(hostInputSamples.size());
+                deviceInputSamples <<= hostInputSamples; 
+
+                kernelData.batchSize = hostInputSamples.size();
+                kernelData.inputSamples = deviceInputSamples.GetDeviceData();
+                kernelData.outputSamples = deviceOutputSamples.GetDeviceData();
 
                 InferBatch(kernelData);
 
-                hostSamples <<= deviceSamples;
-                writeBatch(hostSamples, sampleIdx);
-                sampleIdx += hostSamples.size();
+                hostOutputSamples <<= deviceOutputSamples;
+                writeBatch(hostOutputSamples, sampleIdx);
+                sampleIdx += hostInputSamples.size();
             }
+
+            printf("Readback took %f\n", timer.Get());
         }
     }
 }

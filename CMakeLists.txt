@@ -18,6 +18,7 @@ add_executable(mlplifter
     src/tools/mlplifter/LiftingCodec.cuh   
     src/core/utils/cuda/CudaObject.cuh
     src/core/utils/cuda/CudaVector.cuh
+    src/core/utils/TemplateUtils.h
     src/core/nn/TensorOps.cuh
     src/core/nn/Tensor2D.cuh
     src/core/nn/Tensor1D.cuh
@@ -25,11 +26,14 @@ add_executable(mlplifter
     src/core/nn/Loss.cuh
     src/core/nn/ContinuousRandomVariable.cuh
     src/core/nn/Permute.cuh
-    src/core/nn/Modules.cuh
-    src/core/nn/DataLoader.cuh
+    src/core/nn/MLP/LinearSequential.cuh
     src/core/nn/MLP/MLP.cu
     src/core/nn/MLP/MLP.cuh
-    src/core/nn/MLP/MLPKernels.cuh
+    src/core/nn/MLP/Ctx.cuh
+    src/core/nn/MLP/Training.cuh
+    src/core/nn/MLP/Inference.cuh
+    src/core/nn/MLP/Optimiser.cuh
+    src/core/nn/MLP/Propagate.cuh
     src/core/Includes.h
     src/core/io/ImageIO.cpp
     src/core/io/ImageIO.h

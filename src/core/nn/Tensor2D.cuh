@@ -7,7 +7,7 @@
 
 namespace Flair
 {
-    template<int N, int M, bool HasGrad>
+    template<int N, int M, bool HasGrad = false>
     struct Tensor2D
     {
         // NOTE: Tensor stored in column-major order        

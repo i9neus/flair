@@ -19,18 +19,18 @@ namespace Flair
 			{
 				for (int x = 0; x < passSize; x += 2)
 				{
-					const Real f00 = srcBuffer[y * m_size + x];
-					const Real f10 = srcBuffer[y * m_size + (x + 1)];
-					const Real f01 = srcBuffer[(y + 1) * m_size + x];
-					const Real f11 = srcBuffer[(y + 1) * m_size + (x + 1)];
+					const Real f00 = srcBuffer[y * Base::m_size + x];
+					const Real f10 = srcBuffer[y * Base::m_size + (x + 1)];
+					const Real f01 = srcBuffer[(y + 1) * Base::m_size + x];
+					const Real f11 = srcBuffer[(y + 1) * Base::m_size + (x + 1)];
 
 					const Real h00 = (f00 + f10 + f01 + f11) * 0.25;
 					const Real norm = std::max(1.0f, h00);
 
-					m_swap[(y >> 1) * m_size + (x >> 1)]							= h00;
-					m_swap[(y >> 1) * m_size + (x >> 1) + halfSize]					= (-f00 + f10 - f01 + f11) * 0.25 / norm;	// h10
-					m_swap[((y >> 1) + halfSize) * m_size + (x >> 1)]				= (-f00 - f10 + f01 + f11) * 0.25 / norm;	// h01
-					m_swap[((y >> 1) + halfSize) * m_size + (x >> 1) + halfSize]	= (f00 - f10 - f01 + f11) * 0.25 / norm;	// h11
+					Base::m_swap[(y >> 1) * Base::m_size + (x >> 1)]							= h00;
+					Base::m_swap[(y >> 1) * Base::m_size + (x >> 1) + halfSize]					= (-f00 + f10 - f01 + f11) * 0.25 / norm;	// h10
+					Base::m_swap[((y >> 1) + halfSize) * Base::m_size + (x >> 1)]				= (-f00 - f10 + f01 + f11) * 0.25 / norm;	// h01
+					Base::m_swap[((y >> 1) + halfSize) * Base::m_size + (x >> 1) + halfSize]	= (f00 - f10 - f01 + f11) * 0.25 / norm;	// h11
 				}
 			}
 
@@ -51,17 +51,17 @@ namespace Flair
 			{
 				for (int x = 0; x < passSize; x += 2)
 				{
-					const Real h00 = srcBuffer[(y >> 1) * m_size + (x >> 1)];
-					const Real h10 = srcBuffer[(y >> 1) * m_size + (x >> 1) + halfSize];
-					const Real h01 = srcBuffer[((y >> 1) + halfSize) * m_size + (x >> 1)];
-					const Real h11 = srcBuffer[((y >> 1) + halfSize) * m_size + (x >> 1) + halfSize];
+					const Real h00 = srcBuffer[(y >> 1) * Base::m_size + (x >> 1)];
+					const Real h10 = srcBuffer[(y >> 1) * Base::m_size + (x >> 1) + halfSize];
+					const Real h01 = srcBuffer[((y >> 1) + halfSize) * Base::m_size + (x >> 1)];
+					const Real h11 = srcBuffer[((y >> 1) + halfSize) * Base::m_size + (x >> 1) + halfSize];
 
 					const Real norm = std::max(1.0f, h00);
 
-					m_swap[y * m_size + x]				= h00 + (-h10 - h01 + h11) * norm;	// f00
-					m_swap[y * m_size + (x + 1)]		= h00 + (h10 - h01 - h11) * norm;	// f10
-					m_swap[(y + 1) * m_size + x]		= h00 + (-h10 + h01 - h11) * norm;	// f01
-					m_swap[(y + 1) * m_size + (x + 1)]	= h00 + (h10 + h01 + h11) * norm;	// f11
+					Base::m_swap[y * Base::m_size + x]				= h00 + (-h10 - h01 + h11) * norm;	// f00
+					Base::m_swap[y * Base::m_size + (x + 1)]		= h00 + (h10 - h01 - h11) * norm;	// f10
+					Base::m_swap[(y + 1) * Base::m_size + x]		= h00 + (-h10 + h01 - h11) * norm;	// f01
+					Base::m_swap[(y + 1) * Base::m_size + (x + 1)]	= h00 + (h10 + h01 + h11) * norm;	// f11
 				}
 			}
 

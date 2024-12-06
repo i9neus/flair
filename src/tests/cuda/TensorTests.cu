@@ -5,13 +5,14 @@
 #include "core/nn/TensorOps.cuh"
 #include "core/utils/cuda/CudaObject.cuh"
 #include "core/utils/ConsoleUtils.h"
+#include "core/nn/mlp/LinearSequential.cuh"
 
 namespace Flair
 {
     template<bool Transpose, int N, bool HasGrad>
     __global__  void KernelMulSquare(const Tensor2D<N, N, HasGrad>* X, const Tensor1D<N, HasGrad>* v, Tensor1D<N, HasGrad>* w)
     {
-        __shared__ float scratch[N][N];
+        __shared__ Scratchpad<float, N * N> scratch;
 
         MulImpl<Transpose>(*X, *v, *w, scratch);
     }
@@ -20,7 +21,7 @@ namespace Flair
     template<bool Transpose, int N, int M, int V, int W, bool HasGrad>
     __global__  void KernelMulNonSquare(const Tensor2D<N, M, HasGrad>* X, const Tensor1D<V, HasGrad>* v, Tensor1D<W, HasGrad>* w)
     {
-        __shared__ float scratch[N][M];
+        __shared__ Scratchpad<float, N * M> scratch;
         
         MulImpl<Transpose>(*X, *v, *w, scratch);
     }

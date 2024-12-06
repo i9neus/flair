@@ -36,10 +36,10 @@ namespace Flair
         return 1 - 2 * T(f < 0);
     }
 
-    __host__ __device__ __forceinline__ float  __host__ __device__ toRad(float deg) { return kTwoPi * deg / 360; }
-    __host__ __device__ __forceinline__ float  __host__ __device__ toDeg(float rad) { return 360 * rad / kTwoPi; }
-    template<typename T> __host__ __device__ __forceinline__ T sqr(const T t) { return t * t; }
-    template<typename T> __host__ __device__ __forceinline__ T cub(const T t) { return t * t * t; }
+    __host__ __device__ __forceinline__ float  toRad(float deg) { return kTwoPi * deg / 360; }
+    __host__ __device__ __forceinline__ float  toDeg(float rad) { return 360 * rad / kTwoPi; }
+    template<typename T> __host__ __device__ __forceinline__ T sqr(T t) { return t * t; }
+    template<typename T> __host__ __device__ __forceinline__ T cub(T t) { return t * t * t; }
     template<typename T> __host__ __device__ __forceinline__ T pow4(T t) { t *= t; return t * t; }
 
     // Complement modulus. Negative values are wrapped around to become positive values. e.g. -2 % 10 = 8

@@ -17,8 +17,8 @@ namespace Flair
 			const int halfSize = passSize / 2;
 			for (int i = 0, j = 0; i < passSize; i += 2, j++)
 			{
-				m_lineOutputData[j] = m_lineInputData[i];
-				m_lineOutputData[j + halfSize] = m_lineInputData[i + 1] - m_lineInputData[i];
+				Base::m_lineOutputData[j] = Base::m_lineInputData[i];
+				Base::m_lineOutputData[j + halfSize] = Base::m_lineInputData[i + 1] - Base::m_lineInputData[i];
 			}
 		}
 
@@ -27,8 +27,8 @@ namespace Flair
 			const int halfSize = passSize / 2;
 			for (int i = 0, j = 0; i < halfSize; i++, j += 2)
 			{
-				m_lineOutputData[j] = m_lineInputData[i];
-				m_lineOutputData[j + 1] = m_lineInputData[i] + m_lineInputData[i + halfSize];
+				Base::m_lineOutputData[j] = Base::m_lineInputData[i];
+				Base::m_lineOutputData[j + 1] = Base::m_lineInputData[i] + Base::m_lineInputData[i + halfSize];
 			}
 		}
 

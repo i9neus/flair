@@ -6,7 +6,7 @@
 #include "math/wavelets/2d/StaticDWT2.h"
 #include "core/math/MathUtils.h"
 #include "coders/RLECoder.h"
-#include "image/Operators.h"
+#include "image/ImageOps.h"
 
 #ifdef FLAIR_ENABLE_MULTITHREADING
 #include <thread>

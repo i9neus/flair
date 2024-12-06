@@ -17,27 +17,19 @@ namespace Flair
         class MLP
         {
         public:
-            // The number of weight matrices (equal to hidden layers - 1)
-            static constexpr int kDepth = 4;
-
-            // The width of the network (number nodes)
-            static constexpr int kWidth = 16;
-
-            // The size of the mini batch
-            static constexpr int kMiniBatchSize = 64;
-
-            using Sample = Tensor1D<kWidth, false>;
-            using ReadBatchFunctor = std::function<bool(std::vector<Sample>&, const int)>;
-            using WriteBatchFunctor = std::function<void(const std::vector<Sample>&, const int)>;
+            using InputSample = Tensor1D<16, false>;
+            using OutputSample = Tensor1D<16, false>;
+            using ReadBatchFunctor = std::function<bool(std::vector<InputSample>&, const int)>;
+            using WriteBatchFunctor = std::function<void(const std::vector<OutputSample>&, const int)>;
 
         private:
-            Cuda::Vector<char, kCudaMemMirrored>  m_deviceModelData;
+            Cuda::Vector<float>  m_deviceModelData;
 
         public:
             MLP();
 
             void Initialise();
-            void Train(const std::vector<Sample>&, const std::vector<Sample>&);
+            void Train(const std::vector<InputSample>&, const std::vector<OutputSample>&);
             void Infer(ReadBatchFunctor readBatch, WriteBatchFunctor writeBatch);
         };
     }  

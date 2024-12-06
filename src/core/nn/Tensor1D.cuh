@@ -4,7 +4,7 @@
 
 namespace Flair
 {
-    template<int N, bool HasGrad>
+    template<int N, bool HasGrad = false>
     struct Tensor1D
     {
     private:
@@ -29,11 +29,11 @@ namespace Flair
             ZeroGrad();
         }
 
-        __host__ __device__ Tensor1D(const float(&d)[N][1])
+        /*__host__ __device__ Tensor1D(const float(&d)[N][1])
         {
             memcpy(data, &d[0][0], sizeof(float) * N);
             ZeroGrad();
-        }
+        }*/
 
         template<typename RNG>
         __host__ void Initialise(RNG& rng)

@@ -24,7 +24,7 @@ namespace Flair
 	private:
 		__host__ void PrepareEncoder(const Image1f& waveletImage);
 		__host__ Image3f WaveletTransform(const Image3f& inputImage, const int direction) const;
-		__host__ void GenerateTrainingSet(Image1f& inputImage, const int basisU, const int basisV, LiftingCodec::SampleList& inputSamples, LiftingCodec::SampleList& targetSamples) const;
-		__host__ Sample GenerateInputSample(const int x, const int y) const;
+		__host__ void GenerateTrainingSet(Image1f& inputImage, const int basisU, const int basisV, const int seed, LiftingCodec::SampleList& inputSamples, std::vector<float>& inputMeans,	LiftingCodec::SampleList& targetSamples) const;
+		__host__ std::pair<LiftingCodec::Sample, float> GenerateInputSample(const int x, const int y) const;
 	};
 }

@@ -12,10 +12,11 @@
 #define kKernelIdx				(blockIdx.x * blockDim.x + threadIdx.x)	
 #define kThreadIdx              threadIdx.x
 #define kBlockIdx               blockIdx.x
+#define kBlockDim               blockDim.x
 #define kWarpLane				(threadIdx.x & 31)
 
-template<typename T> __device__ __forceinline__ T kKernelPos() { return T(typename T::kType(kKernelX), typename T::kType(kKernelY)); }
-template<typename T> __device__ __forceinline__ T kKernelDims() { return T(typename T::kType(kKernelWidth), typename T::kType(kKernelHeight)); }
+//template<typename T> __device__ __forceinline__ T kKernelPos() { return T(typename T::kType(kKernelX), typename T::kType(kKernelY)); }
+//template<typename T> __device__ __forceinline__ T kKernelDims() { return T(typename T::kType(kKernelWidth), typename T::kType(kKernelHeight)); }
 
 //#define CUDA_DEVICE_GLOBAL_ASSERTS
 #define CUDA_DEVICE_DEBUG_ASSERTS

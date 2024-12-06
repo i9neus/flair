@@ -27,12 +27,12 @@ namespace Flair
 			if (passIdx < m_numPrimaryPasses)
 			{
 				// If the buffer width is large enough support the wideband wavelet, transform it now. 
-				PrimaryWavelet::Forward(m_lineInputData, m_lineOutputData, passSize);
+				PrimaryWavelet::Forward(Base::m_lineInputData, Base::m_lineOutputData, passSize);
 			}
 			else
 			{
 				// Otherwise, fall back to using Haar to avoid needing to handle the buffer wrap-around
-				Haar1<Real>::Forward(m_lineInputData, m_lineOutputData, passSize);
+				Haar1<Real>::Forward(Base::m_lineInputData, Base::m_lineOutputData, passSize);
 			}
 		}
 
@@ -40,19 +40,19 @@ namespace Flair
 		{
 			if (passIdx < m_numPrimaryPasses)
 			{
-				PrimaryWavelet::Inverse(m_lineInputData, m_lineOutputData, passSize);
+				PrimaryWavelet::Inverse(Base::m_lineInputData, Base::m_lineOutputData, passSize);
 			}
 			else
 			{
-				Haar1<Real>::Inverse(m_lineInputData, m_lineOutputData, passSize);
+				Haar1<Real>::Inverse(Base::m_lineInputData, Base::m_lineOutputData, passSize);
 			}
 		}
 
 	public:
 		StaticDWT1(const int blockSize) : Base(blockSize)
 		{
-			Base::m_numPasses = int(std::log2(m_blockSize / Haar1<Real>::GetMinIOSize())) + 1;
-			m_numPrimaryPasses = int(std::floor(std::log2(m_blockSize / PrimaryWavelet::GetMinIOSize()))) + 1;
+			Base::m_numPasses = int(std::log2(Base::m_blockSize / Haar1<Real>::GetMinIOSize())) + 1;
+			m_numPrimaryPasses = int(std::floor(std::log2(Base::m_blockSize / PrimaryWavelet::GetMinIOSize()))) + 1;
 		}
 	};
 }
