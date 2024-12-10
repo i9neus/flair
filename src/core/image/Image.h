@@ -24,6 +24,8 @@ namespace Flair
         inline bool Contains(const int x, const int y) const { return x >= x0 && x < x1&& y >= y0 && y < y1; }
     };
 
+    enum ImageFlags : int { kImageNearest, kImageBilinear };
+
     inline ImageRect Intersection(const ImageRect& a, const ImageRect& b)
     {
         return ImageRect(std::max(a.x0, b.x0), std::max(a.y0, b.y0), std::min(a.x1, b.x1), std::min(a.y1, b.y1));
@@ -35,7 +37,6 @@ namespace Flair
     public:
         using MapFunctor = std::function<void(int, int, Type*)>;
         using ParallelMapFunctor = std::function<void(int, int, int, Type*)>;
-        enum ImageFlags : int { kNearest, kBilinear };
 
     public:
         Image() : Image(0, 0) {}
@@ -130,9 +131,9 @@ namespace Flair
         inline Type operator[](const int i) const { return m_data[i]; }
 
         template<int InterpolationType>
-        void Sample(float u, float v, float* pixel) const
+        void Sample(float u, float v, Type* pixel) const
         {
-            if (InterpolationType == kBilinear)
+            if (InterpolationType == kImageBilinear)
             {
                 int iu, iv;
                 float du, dv;
@@ -146,23 +147,31 @@ namespace Flair
                 int idx = (iv * m_width + iu) * Channels;
                 for (int c = 0; c < Channels; ++c)
                 {
-                    const float t00 = m_data[idx + c];
-                    const float t10 = m_data[idx + Channels + c];
-                    const float t01 = m_data[idx + m_width * Channels + c];
-                    const float t11 = m_data[idx + (m_width + 1) * Channels + c];
+                    const Type t00 = m_data[idx + c];
+                    const Type t10 = m_data[idx + Channels + c];
+                    const Type t01 = m_data[idx + m_width * Channels + c];
+                    const Type t11 = m_data[idx + (m_width + 1) * Channels + c];
                     pixel[c] = mix(mix(t00, t10, du), mix(t01, t11, du), dv);
                 }
             }
-            if (InterpolationType == kNearest)
+            if (InterpolationType == kImageNearest)
             {
                 int idx = Channels * (clamp(int(v * (m_height - 1)), 0, m_height - 1) * m_width +
-                    clamp(int(u * (m_width - 1)), 0, m_width - 1));
+                                      clamp(int(u * (m_width - 1)), 0, m_width - 1));
 
                 for (int c = 0; c < Channels; ++c, ++idx)
                 {
                     pixel[c] = m_data[idx];
                 }
             }
+        }
+
+        template<int InterpolationType>
+        inline Type Sample(float u, float v) const
+        {
+            Type pixel[Channels];
+            Sample<InterpolationType>(u, v, pixel);
+            return pixel[0];
         }
 
         inline void Sample(int x, int y, Type* pixel) const
