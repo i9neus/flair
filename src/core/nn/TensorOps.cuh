@@ -28,62 +28,6 @@ namespace Flair
         }
     };
 
-    // Matrix multiply of the transpose of an NxM tensor with K-tensor. 
-    template<int N, int M, int V, int W, bool HasGrad, typename ScratchpadT>
-    __forceinline__ __device__ void MulTLegacy(const Tensor2D<N, M, HasGrad>& X, const Tensor1D<V, HasGrad>& v, Tensor1D<W, HasGrad>& w, ScratchpadT& scratch)
-    {
-        // Block must have have at least as many threads as the tensor has elements
-        CudaAssertDebug(blockDim.x >= N * M);
-        static_assert(M <= V && N <= W, "Vector dimensions must be at least as large as tensor dimensions");
-      
-        // Populate the scratch matrix with the products of the N*N tensor and the N tensor
-        // N = cols, M = rows
-        __syncthreads();
-        const int rowIdx = kThreadIdx % M, colIdx = kThreadIdx / M;
-        scratch.At<M>(colIdx, rowIdx) = X[kThreadIdx] * v[rowIdx];
-
-        // Reduce the coefficients. If M is a power of two, the reduce loop can run for one fewer iterations
-        constexpr int Shift = ((M & (M - 1)) == 0) ? 0 : 1;
-        for (int reduceMask = 2; (reduceMask >> Shift) <= M; reduceMask <<= 1)
-        {
-            __syncthreads();
-            if ((rowIdx & (reduceMask - 1)) == 0 && rowIdx + (reduceMask >> 1) < M)
-            {
-                scratch.At<M>(colIdx, rowIdx) += scratch.At<M>(colIdx, rowIdx + (reduceMask >> 1));
-            }
-        }
-        __syncthreads();
-        if (rowIdx == 0) { w[colIdx] = scratch.At<M>(colIdx, 0); }     
-    }
-
-    // Matrix multiply of an NxM tensor with K-tensor. 
-    template<int N, int M, int V, int W, bool HasGrad, typename ScratchpadT>
-    __forceinline__ __device__ void MulLegacy(const Tensor2D<N, M, HasGrad>& X, const Tensor1D<V, HasGrad>& v, Tensor1D<W, HasGrad>& w, ScratchpadT& scratch)
-    {
-        // Block must have have at least as many threads as the tensor has elements
-        CudaAssertDebug(blockDim.x >= N * M);
-        static_assert(N <= V && M <= W, "Vector dimensions must be at least as large as tensor dimensions");      
-
-        // Populate the scratch matrix with the products of the N*N tensor and the N tensor
-        // N = cols, M = rows
-        __syncthreads();
-        const int rowIdx = kThreadIdx % M, colIdx = kThreadIdx / M;
-        scratch.At<M>(colIdx, rowIdx) = X[kThreadIdx] * v[colIdx];
-
-        // Reduce the coefficients. If N is a power of two, the reduce loop can run for one fewer iterations
-        constexpr int Shift = ((N & (N - 1)) == 0) ? 0 : 1; 
-        for (int reduceMask = 2; (reduceMask >> Shift) <= N; reduceMask <<= 1)
-        {
-            __syncthreads();
-            if ((colIdx & (reduceMask - 1)) == 0 && colIdx + (reduceMask >> 1) < N)
-            {
-                scratch.At<M>(colIdx, rowIdx) += scratch.At<M>(colIdx + (reduceMask >> 1), rowIdx);
-            }
-        }
-        __syncthreads();
-        if (colIdx == 0) { w[rowIdx] = scratch.At<M>(0, rowIdx); }  
-    }
-
     // Matrix multiply of an NxM tensor with K-tensor. 
     template<int N, int M, int V, int W, bool HasGrad, typename ScratchpadT>
     __forceinline__ __device__ void Mul(const Tensor2D<N, M, HasGrad>& X, const Tensor1D<V, HasGrad>& v, Tensor1D<W, HasGrad>& w, ScratchpadT& scratch)
