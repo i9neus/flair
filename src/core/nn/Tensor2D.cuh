@@ -4,22 +4,43 @@
 #include "core/utils/ConsoleUtils.h"
 #include "Tensor1D.cuh"
 #include "thirdparty/tinyformat/tinyformat.h"
+#include "core/math/MathUtils.h"
 
 namespace Flair
-{
+{    
     template<int N, int M, bool HasGrad = false>
     struct Tensor2D
     {
         // NOTE: Tensor stored in column-major order        
     private:
-        template<int N, bool HasGrad> struct SizeType { enum : int { Value = N * 2 }; };
-        template<int N> struct SizeType<N, false> { enum : int { Value = N }; };
+        static constexpr int kMaxThreads = 1024;
 
         union
         {
-            float data[SizeType<N, HasGrad>::Value][M];
-            float rawData[SizeType<N, HasGrad>::Value * M];
+            float data[N * (HasGrad ? 2 : 1)][M];
+            float rawData[N * (HasGrad ? 2 : 1) * M];
         };  
+
+    public:
+
+        enum : int
+        {
+            kN = N,
+            kM = M,
+
+            // The number of columns/ros per thread
+            kNPerThread = DivCeil(N, kMaxThreads / M),
+            kMPerThread = DivCeil(M, kMaxThreads / N),
+
+            // Number of threads per row/column
+            kNBlocks = DivCeil(N, kNPerThread),
+            kMBlocks = DivCeil(M, kMPerThread),
+
+            // The number of concurrent operations (threads) required to vector multiple this tensor
+            kConcurrency = CexprMax(M * kNBlocks, N * kMBlocks),
+
+            kFitIntoMaxThreads = kNPerThread == 1 && kMPerThread == 1
+        };
 
     public:
         __host__ __device__ Tensor2D()

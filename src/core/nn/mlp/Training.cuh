@@ -20,7 +20,7 @@ namespace Flair
             __syncthreads();
             if (kThreadIdx < kOutputWidth)
             {
-                ctx.scratch.At<kOutputWidth>(kThreadIdx) = LossFunction::F(ctx.state[kThreadIdx], ctx.target[kThreadIdx]);
+                ctx.scratch.At(kThreadIdx) = LossFunction::F(ctx.state[kThreadIdx], ctx.target[kThreadIdx]);
             }
 
             // Reduce
@@ -29,7 +29,7 @@ namespace Flair
                 __syncthreads();
                 if (kThreadIdx < kOutputWidth && (kThreadIdx & (reduceMask - 1)) == 0)
                 {
-                    ctx.scratch.At<kOutputWidth>(kThreadIdx) += ctx.scratch.At<kOutputWidth>(kThreadIdx + (reduceMask >> 1));
+                    ctx.scratch.At(kThreadIdx) += ctx.scratch.At(kThreadIdx + (reduceMask >> 1));
                 }
             }
 
@@ -37,17 +37,17 @@ namespace Flair
             __syncthreads();
             if (kThreadIdx == 0)
             {
-                ctx.scratch.At<kOutputWidth>(0) /= kOutputWidth;
+                ctx.scratch.At(0) /= kOutputWidth;
             }
 
             // Broadcast
             __syncthreads();
             if (kThreadIdx < kOutputWidth)
             {
-                ctx.error[kThreadIdx] = ctx.scratch.At<kOutputWidth>(0) * LossFunction::dF(ctx.state[kThreadIdx], ctx.target[kThreadIdx]);
+                ctx.error[kThreadIdx] = ctx.scratch.At(0) * LossFunction::dF(ctx.state[kThreadIdx], ctx.target[kThreadIdx]);
             }
 
-            return ctx.scratch.At<kOutputWidth>(0);
+            return ctx.scratch.At(0);
         }
 
         template<int N, typename ScratchpadT>

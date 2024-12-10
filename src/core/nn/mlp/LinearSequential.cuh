@@ -13,19 +13,19 @@ namespace Flair
         struct Linear
         {
         public:
+
+            Tensor2D<N, M, HasGrad>   w;
+            Tensor1D<M, HasGrad>      b;
+
             enum : int
             {
                 kHasGrad = HasGrad,
                 kN = N,
                 kM = M,
                 kMaxDim = (N < M) ? M : N,
-                kConcurrency = M * N,
+                kConcurrency = Tensor2D<N, M, HasGrad>::kConcurrency,
                 kNumParams = N*M + M
-            };
-            
-
-            Tensor2D<N, M, HasGrad>   w; 
-            Tensor1D<M, HasGrad>      b; 
+            }; 
 
         public:
 

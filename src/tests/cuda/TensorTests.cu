@@ -6,24 +6,35 @@
 #include "core/utils/cuda/CudaObject.cuh"
 #include "core/utils/ConsoleUtils.h"
 #include "core/nn/mlp/LinearSequential.cuh"
+#include "core/nn/ContinuousRandomVariable.cuh"
 
 namespace Flair
-{
-    template<bool Transpose, int N, bool HasGrad>
-    __global__  void KernelMulSquare(const Tensor2D<N, N, HasGrad>* X, const Tensor1D<N, HasGrad>* v, Tensor1D<N, HasGrad>* w)
-    {
-        __shared__ Scratchpad<float, N * N> scratch;
+{    
 
-        MulImpl<Transpose>(*X, *v, *w, scratch);
+    // Matrix multiply of an NxM tensor with K-tensor. 
+    template<int NumThreads, int N, int M, int V, int W, bool HasGrad, typename ScratchpadT>
+    __forceinline__ __device__ void MulLarger(const Tensor2D<N, M, HasGrad>& X, const Tensor1D<V, HasGrad>& v, Tensor1D<W, HasGrad>& w, ScratchpadT& scratch)
+    {
+        // Block must have have at least as many threads as the tensor has elements
+        static_assert(N <= V && M <= W, "Vector dimensions must be at least as large as tensor dimensions");
+
+        constexpr int K = (N + (NumThreads / M) - 1) / (NumThreads / M);
+
+        printf("%i\n", M);
+    }
+    
+    template<int N, int M, int V, int W, bool HasGrad>
+    __global__  void KernelMul(const Tensor2D<N, M, HasGrad>* X, const Tensor1D<V, HasGrad>* v, Tensor1D<W, HasGrad>* w)
+    {
+        __shared__ Scratchpad<float, N * M> scratch;        
+        Mul(*X, *v, *w, scratch);
     }
 
-    
-    template<bool Transpose, int N, int M, int V, int W, bool HasGrad>
-    __global__  void KernelMulNonSquare(const Tensor2D<N, M, HasGrad>* X, const Tensor1D<V, HasGrad>* v, Tensor1D<W, HasGrad>* w)
+    template<int N, int M, int V, int W, bool HasGrad>
+    __global__  void KernelMulT(const Tensor2D<N, M, HasGrad>* X, const Tensor1D<V, HasGrad>* v, Tensor1D<W, HasGrad>* w)
     {
-        __shared__ Scratchpad<float, N * M> scratch;
-        
-        MulImpl<Transpose>(*X, *v, *w, scratch);
+        __shared__ Scratchpad<float, N* M> scratch;
+        MulT(*X, *v, *w, scratch);
     }
 
     template<typename ErrType, typename RefType>
@@ -88,13 +99,13 @@ namespace Flair
         const Tensor1D<N, false> targetMulT({ {1.79945551487407}, {1.62929517783041}, {1.96475333274066}, {2.16161456090267}, {2.35518392263892}, {2.65350477631207}, {1.83062043735004}, {2.15022972677939} });
 
         // Test and check errors
-        KernelMulSquare<false> << <1, N* N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
+        KernelMul<< <1, N* N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
         IsOk(cudaDeviceSynchronize());
         r.Download();
         const float errorMul = CwiseMax(Abs(*r - targetMul));
         CheckErrorThreshold(errorMul, kErrorThreshold, *r, targetMul, "TestSquare8x8TensorMul: mul", errorCount, verbose);
 
-        KernelMulSquare<true> << <1, N* N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
+        KernelMulT << <1, N* N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
         IsOk(cudaDeviceSynchronize());
         r.Download();
         const float errorMulT = CwiseMax(Abs(*r - targetMulT));
@@ -125,13 +136,13 @@ namespace Flair
         const Tensor1D<N, false> targetMulT( {{0.963577579819826}, {1.1497192089129}, {0.797750589019602}, {1.21674648559447}});
 
         // Test and check errors
-        KernelMulSquare<false> << <1, N* N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
+        KernelMul << <1, N* N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
         IsOk(cudaDeviceSynchronize());
         r.Download();
         const float errorMul = CwiseMax(Abs(*r - targetMul));
         CheckErrorThreshold(errorMul, kErrorThreshold, *r, targetMul, "TestSquare4x4TensorMul: mul", errorCount, verbose);
 
-        KernelMulSquare<true> << <1, N*N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
+        KernelMulT << <1, N*N >> > (X.GetDeviceData(), v.GetDeviceData(), r.GetDeviceData());
         IsOk(cudaDeviceSynchronize());
         r.Download();
         const float errorMulT = CwiseMax(Abs(*r - targetMulT));
@@ -166,18 +177,67 @@ namespace Flair
         //const Tensor1D<M> targetMul({ {7.},{7.},{7.} });
         //const Tensor1D<N> targetMulT({ {3.},{3.},{3.},{3.},{3.},{3.},{3.} });
 
-        // Test and check errors
-        KernelMulNonSquare<false> << <1, N* M >> > (X.GetDeviceData(), v.GetDeviceData(), rv.GetDeviceData());
+        // Regular N*M
+        KernelMul << <1, N* M >> > (X.GetDeviceData(), v.GetDeviceData(), rv.GetDeviceData());
         IsOk(cudaDeviceSynchronize());
         rv.Download();
         const float errorMul = CwiseMax(Abs(*rv - targetMul));
         CheckErrorThreshold(errorMul, kErrorThreshold, *rv, targetMul, "TestNonSquareTensorMul: mul", errorCount, verbose);
 
-        KernelMulNonSquare<true> << <1, N*M >> > (X.GetDeviceData(), w.GetDeviceData(), rw.GetDeviceData());
+        // Transpose M*N
+        KernelMulT << <1, N*M >> > (X.GetDeviceData(), w.GetDeviceData(), rw.GetDeviceData());
         IsOk(cudaDeviceSynchronize());
         rw.Download();
         const float errorMulT = CwiseMax(Abs(*rw - targetMulT));
         CheckErrorThreshold(errorMulT, kErrorThreshold, *rw, targetMulT, "TestNonSquareTensorMul: mul transpose", errorCount, verbose);
+    }
+
+    template<int N, int M>
+    __host__ void TestLargeTensorMulImpl(const bool verbose, int& errorCount)
+    {
+        constexpr float kErrorThreshold = 1e-5;
+        
+        //NormalRandomDistribution rng(0.f, 1.f, 0);
+        Ones rng;
+        Cuda::Object<Tensor2D<N, M, false>> X;
+        Cuda::Object<Tensor1D<N, false>> v, rw;
+        Cuda::Object<Tensor1D<M, false>> w, rv;
+        using TensorT = Tensor2D<N, M, false>;
+        constexpr int kNumThreads = TensorT::kConcurrency;
+
+        X->Initialise(rng);
+        v->Initialise(rng);
+        w->Initialise(rng);
+        X.Upload();
+        v.Upload();
+        w.Upload();
+
+        Tensor1D<M, false> targetMul;
+        Tensor1D<N, false> targetMulT;
+        Mul(*X, *v, targetMul);
+        MulT(*X, *w, targetMulT);
+
+        KernelMul << <1, kNumThreads >> > (X.GetDeviceData(), v.GetDeviceData(), rv.GetDeviceData());
+        IsOk(cudaDeviceSynchronize());
+        rv.Download();
+        float errorMul = CwiseMax(Abs(*rv - targetMul));
+        CheckErrorThreshold(errorMul, kErrorThreshold, *rv, targetMul, tfm::format("TestLargeTensorMul<%i, %i>: mul", N, M).c_str(), errorCount, verbose);
+
+        KernelMulT << <1, kNumThreads >> > (X.GetDeviceData(), w.GetDeviceData(), rw.GetDeviceData());
+        IsOk(cudaDeviceSynchronize());
+        rw.Download();
+        errorMul = CwiseMax(Abs(*rw - targetMulT));
+        CheckErrorThreshold(errorMul, kErrorThreshold, *rw, targetMulT, tfm::format("TestLargeTensorMul<%i, %i>: mul transpose", N, M).c_str(), errorCount, verbose);
+    }
+
+    __host__ void TestLargeTensorMul(const bool verbose, int& errorCount)
+    {
+        TestLargeTensorMulImpl<17, 29>(verbose, errorCount);
+        TestLargeTensorMulImpl<27, 31>(verbose, errorCount);
+        TestLargeTensorMulImpl<32, 32>(verbose, errorCount);
+        TestLargeTensorMulImpl<7, 68>(verbose, errorCount);
+        TestLargeTensorMulImpl<1, 55>(verbose, errorCount);
+        TestLargeTensorMulImpl<87, 1>(verbose, errorCount);
     }
 
     __host__ void RunTensorTests(const bool verbose)
@@ -187,6 +247,7 @@ namespace Flair
         TestSquare4x4TensorMul(verbose, errorCount);
         TestSquare8x8TensorMul(verbose, errorCount);
         TestNonSquareTensorMul(verbose, errorCount);
+        TestLargeTensorMul(verbose, errorCount);
 
         AssertFmt(errorCount == 0, "Test failed with %i errors", errorCount);
 

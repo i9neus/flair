@@ -122,4 +122,9 @@ namespace Flair
         b = s;
     }
 
+    // Ceiling of positive integer divide
+    __host__ __device__ __forceinline__ constexpr int DivCeil(const int a, const int b) { return (a + b - 1) / b; }
+    // Constexpr versions of max and min functions
+    __host__ __device__ __forceinline__ constexpr int CexprMax(const int a, const int b) { return (a > b) ? a : b; }
+    __host__ __device__ __forceinline__ constexpr int CexprMin(const int a, const int b) { return (a < b) ? a : b; }
 }

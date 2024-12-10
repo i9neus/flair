@@ -1,5 +1,4 @@
 #include "MLP.cuh"
-#include "tests/cuda/TensorTests.cuh"
 #include "core/utils/HighResTimer.h"
 #include "../ContinuousRandomVariable.cuh"
 #include "../Permute.cuh"
@@ -26,6 +25,7 @@ namespace Flair
         using OptimiserFunction = Optimiser::Adam<LearningRate>;
         //using OptimiserFunction = Optimiser::SGD<LearningRate>;
 
+        //using Model = LinearSequential<Linear<36, 36>, Linear<36, 31>, Linear<31, 27>>;
         using Model = LinearSequential<Linear<16, 16>, Linear<16, 16>, Linear<16, 16>>;
 
         using Policy = MLPPolicy<Model, HyperParameters<kMiniBatchSize, ActivationFunction, LossFunction, OptimiserFunction>>;
@@ -41,9 +41,7 @@ namespace Flair
 
         void MLP::Train(const std::vector<InputSample>& inputSamples, const std::vector<OutputSample>& targetSamples)
         {
-            Assert(inputSamples.size() == targetSamples.size());
-            
-            RunTensorTests(false);
+            Assert(inputSamples.size() == targetSamples.size());            
 
             printf_red("TrainingCtx: %i bytes\n", sizeof(TrainingCtx<Policy>));
 
@@ -76,7 +74,7 @@ namespace Flair
             kernelData.mlpModelData = m_deviceModelData.GetDeviceData();
             kernelData.mlpGradData = deviceGradData.GetDeviceData();
             kernelData.inputSamples = deviceInputSamples.GetDeviceData();
-            kernelData.targetSamples= deviceTargetSamples.GetDeviceData();
+            kernelData.targetSamples = deviceTargetSamples.GetDeviceData();
             kernelData.optimiserData = deviceOptimiserData.GetDeviceData();
             kernelData.sampleIdxs = sampleIdxs.GetDeviceData();
             kernelData.sampleLosses = deviceSampleLosses.GetDeviceData();

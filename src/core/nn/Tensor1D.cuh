@@ -67,17 +67,63 @@ namespace Flair
         __host__ __forceinline__ TensorIterator<float> end() { return TensorIterator<float>(data, N); }
         __host__ __forceinline__ TensorIterator<const float> end() const { return TensorIterator<const float>(data, N); }
 
-        __forceinline__ __device__ __host__ Tensor1D& operator+=(const Tensor1D& rhs)
-        {
-            for (int i = 0; i < N; ++i) { data[i] = rhs.data[i]; }
-            return *this;
+#define CwiseTensorUnaryOp(op) \
+        __forceinline__ __device__ __host__ Tensor1D& operator##op(const Tensor1D& rhs) \
+        { \
+            for (int i = 0; i < N; ++i) { data[i] ##op rhs.data[i]; } \
+            return *this; \
         }
 
-        __forceinline__ __device__ __host__ Tensor1D& operator-=(const Tensor1D& rhs)
-        {
-            for (int i = 0; i < N; ++i) { data[i] = rhs.data[i]; }
-            return *this;
+        CwiseTensorUnaryOp(+=)
+        CwiseTensorUnaryOp(-=)
+        CwiseTensorUnaryOp(*=)
+        CwiseTensorUnaryOp(/=)
+
+#undef CwiseTensorUnaryOp
+
+#define CwiseScalarUnaryOp(op) \
+        __forceinline__ __device__ __host__ Tensor1D& operator##op(const float rhs) \
+        { \
+            for (int i = 0; i < N; ++i) { data[i] ##op rhs; } \
+            return *this; \
         }
+        
+        CwiseScalarUnaryOp(+=)
+        CwiseScalarUnaryOp(-=)
+        CwiseScalarUnaryOp(*=)
+        CwiseScalarUnaryOp(/=)
+
+#undef CwiseScalarUnaryOp
+
+#define CwiseTensorBinaryOp(op) \
+        __forceinline__ __device__ __host__ Tensor1D operator##op(const Tensor1D& rhs) \
+        { \
+            Tensor1D t; \
+            for (int i = 0; i < N; ++i) { t[i] = data[i] ##op rhs.data[i]; } \
+            return t; \
+        }
+
+        CwiseTensorBinaryOp(+)
+        CwiseTensorBinaryOp(-)
+        CwiseTensorBinaryOp(*)
+        CwiseTensorBinaryOp(/)
+
+#undef CwiseTensorBinaryOp
+
+#define CwiseScalarBinaryOp(op) \
+        __forceinline__ __device__ __host__ Tensor1D operator##op(const float rhs) \
+        { \
+            Tensor1D t; \
+            for (int i = 0; i < N; ++i) { t[i] = data[i] ##op rhs; } \
+            return t; \
+        }
+
+        CwiseScalarBinaryOp(+)
+        CwiseScalarBinaryOp(-)
+        CwiseScalarBinaryOp(*)
+        CwiseScalarBinaryOp(/)
+
+#undef CwiseScalarBinaryOp
 
         __host__ __device__ void Print(const bool showGrad = false) const
         {
