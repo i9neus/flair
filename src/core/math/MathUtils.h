@@ -114,6 +114,7 @@ namespace Flair
         return i;
     }
 
+    // Swap two values
     template<typename T>
     __host__ __device__ __forceinline__ void Swap(T& a, T& b)
     {
@@ -127,4 +128,35 @@ namespace Flair
     // Constexpr versions of max and min functions
     __host__ __device__ __forceinline__ constexpr int CexprMax(const int a, const int b) { return (a > b) ? a : b; }
     __host__ __device__ __forceinline__ constexpr int CexprMin(const int a, const int b) { return (a < b) ? a : b; }
+
+    // Find the mean of a list of values. Assumes that ContainerType is iteratble and has a size() interrogator 
+    template<typename ContainerType>
+    __host__ __device__ auto ListMean(const ContainerType& values)
+    {        
+        using Type = decltype(ContainerType::operator[]());
+        static_assert(std::is_arithmetic<Type>::value, "Container does not contain arithmetic type.");
+
+        Type mean = Type(0);
+        for (auto& v : values) { mean += v; }
+        return mean / Type(values.size());
+    }
+
+    // Find the mean of a list of values. Assumes that ContainerType is iteratble and has a size() interrogator 
+    template<typename ContainerType>
+    __host__ __device__ auto ListVariance(const ContainerType& values)
+    {
+        using Type = decltype(ContainerType::operator[]());
+        static_assert(std::is_arithmetic<Type>::value, "Container does not contain arithmetic type.");
+
+        Type m = 0, m2 = 0;
+        for (auto& v : values)
+        {
+            m += v[i];
+            m2 += sqr(v[i]);
+        }
+        m /= Type(values.size());
+        m2 /= Type(values.size());
+
+        return m2 - sqr(m);
+    }
 }

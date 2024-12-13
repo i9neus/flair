@@ -16,6 +16,7 @@ add_executable(mlplifter
     src/tools/mlplifter/Main.cu
     src/tools/mlplifter/LiftingCodec.cu
     src/tools/mlplifter/LiftingCodec.cuh   
+    src/tools/mlplifter/FeatureHeuristic.cuh
     src/core/utils/cuda/CudaObject.cuh
     src/core/utils/cuda/CudaVector.cuh
     src/core/utils/TemplateUtils.h

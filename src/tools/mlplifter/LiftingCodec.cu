@@ -6,6 +6,7 @@
 #include "core/utils/ConsoleUtils.h"
 #include "core/utils/ThreadUtils.h"
 #include "core/image/ImageOps.h"
+#include "FeatureHeuristic.cuh"
 #include <numeric>
 #include <fstream>
 #include <random>
@@ -94,14 +95,16 @@ namespace Flair
             {
                 for (int u = -1; u <= 1; ++u, ++it)
                 {
-                    const float f = CoefficientAt((x + u) / float(m_mipMap[0].Width() / 2), (y + v) / float(m_mipMap[0].Height() / 2), quadX, quadY, (i == 0) ? 0 : 1);                    
+                    const float f = CoefficientAt((x + u) / float(m_mipMap[0].Width() / 2), 
+                                                  (y + v) / float(m_mipMap[0].Height() / 2), 
+                                                  quadX, quadY, (i == 0) ? 0 : 1);                    
                     *it = f; 
                     if(i == 0) mean += f;
                 }
             }
         }
         
-        mean = std::max(1e-3f, mean / 9);
+        mean = std::max(1e-10f, mean / 9);
         for (int i = 0; i < InputSample::kN; ++i) 
         { 
             if (i < 9) { sample[i] -= mean; }
@@ -123,7 +126,9 @@ namespace Flair
                 for (int u = -1; u <= 1; ++u, ++it)
                 {
                     Assert(it != sample.end());
-                    const float f = CoefficientAt((x + u) / float(m_mipMap[0].Width() / 2), (y + v) / float(m_mipMap[0].Height() / 2), quadX, quadY, 0);
+                    const float f = CoefficientAt((x + u) / float(m_mipMap[0].Width() / 2), 
+                                                  (y + v) / float(m_mipMap[0].Height() / 2), 
+                                                  quadX, quadY, 0);
                     *it = f;
                 }
             }
@@ -131,42 +136,20 @@ namespace Flair
         return sample;
     }
 
-    __host__ void LiftingCodec::GenerateTrainingSet(Image1f& waveletImage, const int basisU, const int basisV, const int seed, LiftingCodec::InputSampleList& inputSamples, std::vector<float>& inputMeans, LiftingCodec::OutputSampleList& targetSamples) const
+    __host__ void LiftingCodec::GenerateTrainingSet(Image1f& waveletImage, const int seed, LiftingCodec::InputSampleList& inputSamples, std::vector<float>& inputMeans, LiftingCodec::OutputSampleList& targetSamples)
     {
         inputSamples.clear();
         inputMeans.clear();
         targetSamples.clear();
         
-        Image1f varImage;
-        varImage.Resize(waveletImage);
-
         // Only consider the downsampled region of the image
-        ImageRect region(0, 0, waveletImage.Width() / 2 - 4, waveletImage.Height() / 2 - 4);
+        ImageRect region(0, 0, waveletImage.Width() / 2, waveletImage.Height() / 2);
 
-        const int numThreads = varImage.GetThreadCount();
-        std::vector<float> maxVarMap(numThreads, 0.0f);
+        float maxFeatureVal;
+        using Heuristic = DCTFeatureHeuristic;
+        //using Heuristic = VarianceHeuristic;
 
-        // Map and reduce the variance
-        Image1f::ParallelMapFunctor calcVarFunctor = [&](const int x, const int y, const int threadIdx, float* pixel)
-        {
-            float m = 0, m2 = 0;
-            for (int v = -1; v <= 1; ++v)
-            {
-                for (int u = -1; u <= 1; ++u)
-                {
-                    const float f = waveletImage.Sample(x + u, y + v);
-                    m += f;
-                    m2 += f * f;
-                }
-            }
-            *pixel = m2 / 9 - sqr(m / 9); // Variance
-            *pixel = std::pow(*pixel, 0.6f); // Mix
-            //*pixel = std::sqrt(*pixel); // Standard deviation
-
-            maxVarMap[threadIdx] = std::max(*pixel, maxVarMap[threadIdx]);
-        };
-        varImage.ParallelMap(calcVarFunctor, region);
-        const float maxImageVar = std::reduce(maxVarMap.begin(), maxVarMap.end(), 0.0f, [](float a, float b) -> float { return std::max(a, b); });
+        Heuristic::Classify(waveletImage, region, m_heuristicImage, maxFeatureVal);
 
         // Create empty histograms
         constexpr int kPDFSize = 100;
@@ -176,13 +159,14 @@ namespace Flair
         // Bucket each pixel based on its relative variance
         Image1f::MapFunctor histVarFunctor = [&](const int x, const int y, float* pixel)
         {
-            if (x < region.x1 - 4 && y < region.y1 - 4)
+            if (x < region.x1 && y < region.y1)
             {
-                const int bucketIdx = clamp(int(kPDFSize * (*pixel / maxImageVar)), 0, kPDFSize - 1);
+                float importance = saturate(std::pow(*pixel / maxFeatureVal, 0.5f) * 2.f);
+                const int bucketIdx = clamp(int(kPDFSize * importance), 0, kPDFSize - 1);
                 histogram[bucketIdx].emplace_back(x, y);
             }
         };
-        varImage.Map(histVarFunctor, region);
+        m_heuristicImage.Map(histVarFunctor, region);
 
         // Construct and normalise a PDF and CDF based on the inverse bucket size
         constexpr float kMaxPdf = 100.f;
@@ -201,7 +185,7 @@ namespace Flair
                 file << tfm::format("%.10f ", pdf[i]);
             }
         }
-        file.close();*/       
+        file.close();*/
 
         struct ThreadCtx
         {
@@ -214,14 +198,15 @@ namespace Flair
             inline int RandInt() { return rng(mt); }
         };
 
-        Threaded<ThreadCtx> runner;
+        constexpr int kNumSamples = 20000;
+
+        Threaded<ThreadCtx> runner(std::min(16, kNumSamples));
         runner.Initialise([&](ThreadCtx& ctx, int i, int N)
             {
                 ctx.mt = std::mt19937(std::hash<int>{}(i + seed));
                 ctx.rng = std::uniform_int_distribution<int>();
             });
 
-        constexpr int kNumSamples = 10000;
         std::atomic<int> numSamples(0);
         Threaded<ThreadCtx>::Functor sampleFunctor = [&](ThreadCtx& ctx, int i, int N)
         {
@@ -240,8 +225,7 @@ namespace Flair
                     int bucketIdx = std::distance(cdf.begin(), lower);
                     Assert(bucketIdx < histogram.size());
                     bucket = &histogram[bucketIdx];
-                } 
-                while (bucket->size() == 0);
+                } while (bucket->size() == 0);
 
                 // Draw a sample from the bucket
                 auto [x, y] = (*bucket)[ctx.RandInt() % bucket->size()];
@@ -251,18 +235,18 @@ namespace Flair
                 //y += ctx.RandInt() % 2; 
 
                 // Construct the input sample
-                auto [ inputSample, mean ] = GenerateInputSample(x, y);
+                auto [inputSample, mean] = GenerateInputSample(x, y);
                 ctx.inputSamples[sampleIdx] = inputSample;
                 ctx.inputMeans[sampleIdx] = mean;
                 // ...and the target sample
                 ctx.targetSamples[sampleIdx] = GenerateTargetSample(x, y) / mean;
             }
         };
-        runner.Run(sampleFunctor);
+        runner.RunSerial(sampleFunctor);
 
         // Combine the samples into a single array
         for (auto& ctx : runner.GetContexts())
-        {            
+        {
             inputSamples.insert(inputSamples.end(), ctx.inputSamples.begin(), ctx.inputSamples.end());
             inputMeans.insert(inputMeans.end(), ctx.inputMeans.begin(), ctx.inputMeans.end());
             targetSamples.insert(targetSamples.end(), ctx.targetSamples.begin(), ctx.targetSamples.end());
@@ -273,7 +257,7 @@ namespace Flair
 
         printf_red("Total samples: %i\n", inputSamples.size());
 
-        //std::swap(waveletImage, varImage);
+        //std::swap(waveletImage, m_heuristicImage);
     }
 
     template<typename SampleType>
@@ -324,7 +308,7 @@ namespace Flair
 
     __host__ Image3f LiftingCodec::Encode(const Image3f& inputImage)
     { 
-        RunTensorTests(true);
+        //RunTensorTests(true);
         
         Image3f gammaImage = inputImage;
 
@@ -346,49 +330,31 @@ namespace Flair
 
         PrepareEncoder(chnlData);
 
-        for (int quadIdx = 1; quadIdx < 2; ++quadIdx)
+        printf_green("Training...\n");
+
+        ////////////////////////////////////////////////////////////////////////////////////////
+
+        printf("Generating training set...\n");
+        InputSampleList inputSamples;
+        OutputSampleList targetSamples, outputSamples;
+        std::vector<float> inputMeans;
+        GenerateTrainingSet(chnlData, 8783652, inputSamples, inputMeans, targetSamples);
+
+        ////////////////////////////////////////////////////////////////////////////////////////
+
+        printf("Training MLP...\n");
+        NN::MLP mlp;
+        mlp.Train(inputSamples, targetSamples);        
+
+        ////////////////////////////////////////////////////////////////////////////////////////
+
+        constexpr bool kInferImageCoeffs = false;
+        constexpr bool kTestInference = true;
+
+        if (kInferImageCoeffs)
         {
-            const int basisU = (chnlData.Width() / 2) * (quadIdx & 1);
-            const int basisV = (chnlData.Height() / 2) * ((quadIdx >> 1) & 1);
-            printf_green("Training quadrant [%i, %i]...\n", basisU, basisV);
-
-            ////////////////////////////////////////////////////////////////////////////////////////
-            
-            printf("Generating training set...\n");
-            InputSampleList inputSamples;
-            OutputSampleList targetSamples, outputSamples;
-            std::vector<float> inputMeans;
-            GenerateTrainingSet(chnlData, basisU, basisV, 8783652, inputSamples, inputMeans, targetSamples);
-
-            ////////////////////////////////////////////////////////////////////////////////////////
-
-            printf("Training MLP...\n");
-            NN::MLP mlp;
-            //mlp.Train(inputSamples, targetSamples);
-
-            ////////////////////////////////////////////////////////////////////////////////////////
-
-            GenerateTrainingSet(chnlData, basisU, basisV, 235265, inputSamples, inputMeans, targetSamples);
-
-            /*mlp.Infer( 
-                [&](std::vector<InputSample>& samples, const int batchIdx) -> bool
-                {
-                    if (batchIdx != 0) return false;
-                    samples = inputSamples;
-                    return true;
-                },
-                [&](const std::vector<OutputSample>& samples, const int batchIdx) -> void
-                {
-                    outputSamples = samples;
-                }
-            );*/
-
-            DrawSamples(chnlData, inputSamples, targetSamples, outputSamples);
-
-            ////////////////////////////////////////////////////////////////////////////////////////
-
-            /*const int kSamplesPerBatch = 10000;
-            const int kNumPixels = (chnlData.Width() / 2 - 4) * (chnlData.Height() / 2 - 4);
+            const int kSamplesPerBatch = 10000;
+            const int kNumPixels = (chnlData.Width() / 2) * (chnlData.Height() / 2);
             auto readSamples = [&](std::vector<InputSample>& samples, const int batchIdx) -> bool
             {
                 if (batchIdx >= kNumPixels)
@@ -403,7 +369,7 @@ namespace Flair
                     inputMeans.clear();
                     for (int miniBatchIdx = 0, pixelIdx = batchIdx; miniBatchIdx < kSamplesPerBatch && pixelIdx < kNumPixels; ++miniBatchIdx, ++pixelIdx)
                     {
-                        const int x = pixelIdx % (chnlData.Width() / 2 - 4), y = pixelIdx / (chnlData.Width() / 2 - 4);
+                        const int x = pixelIdx % (chnlData.Width() / 2), y = pixelIdx / (chnlData.Width() / 2);
                         auto [sample, mean] = GenerateInputSample(x, y);
                         samples.push_back(sample);
                         inputMeans.push_back(mean);
@@ -416,32 +382,75 @@ namespace Flair
             {
                 for (int sampleIdx = 0, pixelIdx = batchIdx; sampleIdx < samples.size(); ++sampleIdx, ++pixelIdx)
                 {
-                    const int x = pixelIdx % (chnlData.Width() / 2 - 4) + basisU;
-                    const int y = pixelIdx / (chnlData.Width() / 2 - 4) + basisV;
-                    
-                    //*chnlData.At(x, y) = samples[sampleIdx][0] * inputMeans[sampleIdx];
                     auto sampleIt = samples[sampleIdx].begin();
-                    for (int v = 0; v < 4; ++v)
+                    for (int quadIdx = 1; quadIdx < 4; ++quadIdx)
                     {
-                        for (int u = 0; u < 4; ++u, ++sampleIt)
+                        const int basisU = (chnlData.Width() / 2) * (quadIdx & 1);
+                        const int basisV = (chnlData.Height() / 2) * ((quadIdx >> 1) & 1);
+
+                        const int x = pixelIdx % (chnlData.Width() / 2) + basisU;
+                        const int y = pixelIdx / (chnlData.Width() / 2) + basisV;
+
+                        *chnlData.At(x, y) = samples[sampleIdx][4 + (quadIdx - 1) * 9] *inputMeans[sampleIdx];
+                        /*for (int v = -1; v <= 1; ++v)
                         {
-                            *chnlData.At(x + u, y + v) += *sampleIt * inputMeans[sampleIdx];
-                        }
+                            for (int u = -1; u <= 1; ++u, ++sampleIt)
+                            {
+                                Assert(sampleIt != samples[sampleIdx].end());
+                                if (chnlData.Contains(x + u, y + v))
+                                {
+                                    *chnlData.At(x + u, y + v) += *sampleIt * inputMeans[sampleIdx];
+                                }
+                            }
+                        }*/
                     }
                 }
-            };*/
+            };
 
-            ImageRect region(basisU, basisV, basisU + waveletImage.Width() / 2, basisV + waveletImage.Height() / 2);
-            chnlData.ParallelMap([&](int x, int y, int, float* pixel) { *pixel = 0; }, region);
+            // Clear the finest-scale wavelet coefficients
+            ImageRect region(0, 0, waveletImage.Width() / 2, waveletImage.Height() / 2);
+            chnlData.ParallelMap([&](int x, int y, int, float* pixel)
+                {
+                    if (!region.Contains(x, y)) { *pixel = 0; }
+                });
 
+            // Infer the coefficients
             printf("Reconstructing wavelet coefficients\n");
-            //mlp.Infer(readSamples, writeSamples);
+            mlp.Infer(readSamples, writeSamples);
 
-            chnlData.ParallelMap([&](int x, int y, int, float* pixel) { *pixel /= 16.; }, region);            
+            // Normalise the accumulated values
+            /*chnlData.ParallelMap([&](int x, int y, int, float* pixel)
+                {
+                    if (!region.Contains(x, y)) { *pixel /= 9; }
+                });*/
         }
 
-        ImageRect region = ImageRect(0, 0, waveletImage.Width() / 2, waveletImage.Height() / 2);
-        //chnlData.ParallelMap([&](int x, int y, int, float* pixel) { *pixel = 0.5; }, region);
+        ////////////////////////////////////////////////////////////////////////////////////////
+
+        if (kTestInference)
+        {
+            GenerateTrainingSet(chnlData, 235265, inputSamples, inputMeans, targetSamples);
+
+            mlp.Infer(
+                [&](std::vector<InputSample>& samples, const int batchIdx) -> bool
+                {
+                    if (batchIdx != 0) { return false; }
+                    else
+                    {
+                        samples = inputSamples;
+                        return true;
+                    }
+                },
+                [&](const std::vector<OutputSample>& samples, const int batchIdx) -> void
+                {
+                    outputSamples = samples;
+                }
+                );
+
+            DrawSamples(chnlData, inputSamples, targetSamples, outputSamples);
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////
 
         waveletImage.Erase();     
         waveletImage.Resize(chnlData);
@@ -454,6 +463,12 @@ namespace Flair
         /*for (int i = 0; i < 3; ++i)
         {
             waveletImage.EmplaceChannel(chnlData, i);
+        }*/
+
+        /*waveletImage.Resize(m_heuristicImage);
+        for (int i = 0; i < 3; ++i)
+        {
+            waveletImage.EmplaceChannel(m_heuristicImage, i);
         }*/
 
         return waveletImage;

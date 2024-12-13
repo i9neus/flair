@@ -52,19 +52,6 @@ namespace Flair
 			}
 		}
 
-#if !defined(FLAIR_DISABLE_MULTITHREADING)
-
-		void Run(Functor onExecute)
-		{			
-			for (int i = 0; i < m_ctxs.size(); ++i)
-			{
-				m_threads.emplace_back(&Threaded<Ctx>::RunThread, this, onExecute, std::ref(m_ctxs[i]), i);
-			}
-
-			// Wait for all the workers to finish
-			for (int i = 0; i < m_ctxs.size(); ++i) { m_threads[i].join(); }
-		}
-#else
 		void RunSerial(Functor onExecute)
 		{
 			for (int i = 0; i < m_ctxs.size(); ++i)
@@ -72,7 +59,22 @@ namespace Flair
 				RunThread(onExecute, m_ctxs[i], 0);
 			}
 		}
+
+
+		void Run(Functor onExecute)
+		{			
+#if !defined(FLAIR_DISABLE_MULTITHREADING)
+			for (int i = 0; i < m_ctxs.size(); ++i)
+			{
+				m_threads.emplace_back(&Threaded<Ctx>::RunThread, this, onExecute, std::ref(m_ctxs[i]), i);
+			}
+
+			// Wait for all the workers to finish
+			for (int i = 0; i < m_ctxs.size(); ++i) { m_threads[i].join(); }
+#else
+			RunSerial(onExecute);
 #endif
+		}
 
 		// Iterators
 		inline Iterator begin() { return Iterator(m_ctxs.begin()); }
