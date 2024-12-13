@@ -13,9 +13,11 @@ namespace Flair
         struct Linear
         {
         public:
+            using WeightsT = Tensor2D<N, M, HasGrad>;
+            using BiasesT = Tensor1D<M, HasGrad>;
 
-            Tensor2D<N, M, HasGrad>   w;
-            Tensor1D<M, HasGrad>      b;
+            WeightsT  w;
+            BiasesT   b;
 
             enum : int
             {
@@ -23,11 +25,16 @@ namespace Flair
                 kN = N,
                 kM = M,
                 kMaxDim = (N < M) ? M : N,
-                kConcurrency = Tensor2D<N, M, HasGrad>::kConcurrency,
+                kMaxConcurrency = Tensor2D<N, M, HasGrad>::kMaxConcurrency,
                 kNumParams = N*M + M
             }; 
 
         public:
+
+            __host__ std::string Format() const
+            {
+                return w.Format() + "\n" + b.Format() + "\n";
+            }
 
             __inline__ __host__ __device__ void ZeroGrad()
             {
@@ -52,8 +59,17 @@ namespace Flair
             __host__ __device__ static constexpr int GetMaxConcurrency()
             {
                 int maxCon = 0;
-                ([&](int con) { maxCon = (con > maxCon) ? con : maxCon; }(Layers::kConcurrency), ...);
+                ([&](int con) { maxCon = (con > maxCon) ? con : maxCon; }(Layers::kMaxConcurrency), ...);
                 return maxCon;
+            }
+
+            template<typename LayerN> __host__ __device__ constexpr static bool VerifyLayerConnectivityRecursor() { return true;  }
+            
+            template<typename Layer1, typename Layer2, typename... Next>
+            __host__ __device__ constexpr static bool VerifyLayerConnectivityRecursor()
+            {
+                static_assert(Layer1::kM == Layer2::kN, "LinearSequential connectivity is invalid.");
+                return VerifyLayerConnectivityRecursor<Layer2, Next...>();
             }
 
         public:
@@ -75,7 +91,9 @@ namespace Flair
                 kMaxWidth = GetMaxWidth(),
 
                 // Maximum number of concurrent threads per block for concurrent evaluation of this model
-                kConcurrency = GetMaxConcurrency(),
+                kMaxConcurrency = GetMaxConcurrency(),
+
+                kIsValidConnected = VerifyLayerConnectivityRecursor<Layers...>(),
 
                 // Total number of parameters in the model
                 // FIXME: Due to a bug in the MSVC compiler, we can't use a fold to query Layers::kNumParams direct. 
@@ -96,41 +114,79 @@ namespace Flair
                 ctx.acts[LayerIdx][kThreadIdx] = ctx.state[kThreadIdx];
             }
 
-            template<typename Ctx, int LayerIdx, typename Layer, typename... Next>
-            struct ForwardRecurse
+            template<typename Layer, int LayerIdx, typename Ctx>
+            __forceinline__ __device__ static void PrintActs(Ctx&) { }
+
+            template<typename Layer, int LayerIdx, typename PolicyT>
+            __forceinline__ __device__ static void PrintActs(TrainingCtx<PolicyT>& ctx)
             {
-                __forceinline__ __device__ static void F(Ctx& ctx, const float* data)
+                __syncthreads();
+
+                /*if (kThreadIdx == 0)
+                {
+                    for (int i = 0; i < Layer::kM; ++i)
+                    {
+                        //CudaAssert(ctx.acts[LayerIdx][i] < 10000.);
+                        if (ctx.acts[LayerIdx][i] > 10000.)
+                        {
+                            ctx.acts[LayerIdx][i] = ctx.acts[LayerIdx][i];
+                        }
+                    }
+                }*/
+                __syncthreads();
+
+                /*if (kThreadIdx == 0)
+                {
+                    printf("%i: ", LayerIdx);
+                    for (int i = 0; i < Layer::kM; ++i)
+                    {
+                        printf("%.3f ", ctx.acts[LayerIdx][i]);
+                    }
+                    printf("\n");
+                }*/
+            }
+
+            template<typename Ctx, int LayerIdx, typename Layer, typename... Next>
+            struct ForwardRecursor
+            {
+                 __device__ static void F(Ctx& ctx, const float* data)
                 {
                     __syncthreads();
 
                     const Layer& layer = *reinterpret_cast<const Layer*>(data);
-                    using Policy = typename Ctx::Policy;
+
+                    if (kThreadIdx < Layer::kN) ctx.error[kThreadIdx] = ctx.state[kThreadIdx];
+
+                    if (kThreadIdx < ctx.scratch.Size()) ctx.scratch.At(kThreadIdx) = 0;
 
                     // Multiply the state by the layer weights
                     Mul(layer.w, ctx.state, ctx.state, ctx.scratch);
 
+                    __syncthreads();
                     if (kThreadIdx < Layer::kM)
                     {
                         // Add the bias
-                        ctx.state[kThreadIdx] += layer.b[kThreadIdx];
+                        ctx.state[kThreadIdx] += layer.b[kThreadIdx];      
 
                         // Apply leaky ReLU activation, except on the last layer
                         if (LayerIdx != kDepth - 1)
                         {
-                            Policy::Hyper::Activation::F(ctx.state[kThreadIdx]);
+                            Ctx::Policy::Hyper::Activation::F(ctx.state[kThreadIdx]);
                         }
 
                         // Cache the feed-forward intermediate activations in this layer for use during backprop
                         CacheActivations<LayerIdx>(ctx);
                     }
 
-                    // Recurse to the next layer
-                    ForwardRecurse<Ctx, LayerIdx + 1, Next...>::F(ctx, data + sizeof(Layer) / sizeof(float));
+                    //PrintActs<Layer, LayerIdx>(ctx);
+                  
+                    // Recursor to the next layer
+                    ForwardRecursor<Ctx, LayerIdx + 1, Next...>::F(ctx, data + sizeof(Layer) / sizeof(float));
                 }
             };
 
             template<typename Ctx, int LayerIdx>
-            struct ForwardRecurse<Ctx, LayerIdx, Terminator>
+            struct ForwardRecursor<Ctx, LayerIdx, Terminator>
             {
                 __forceinline__ __device__ static void F(Ctx&, const float*) {}
             };
@@ -138,24 +194,24 @@ namespace Flair
             //***************************** Backward *****************************
 
             template<typename Ctx, int LayerIdx, typename Layer, typename... Next>
-            struct BackwardRecurse
+            struct BackwardRecursor
             {
                 __forceinline__ __device__ static void F(Ctx& ctx, float* data)
                 {
                     // Work in reverse from the last layer
-                    BackwardRecurse<Ctx, LayerIdx + 1, Next...>::F(ctx, data + sizeof(Layer) / sizeof(float));
+                    BackwardRecursor<Ctx, LayerIdx + 1, Next...>::F(ctx, data + sizeof(Layer) / sizeof(float));
 
                     // Col -> source neuron. Row -> destination neuron.
-                    const int rowIdx = kThreadIdx % Layer::kM;
-                    const int colIdx = kThreadIdx / Layer::kM;
+  
                     Layer& layer = *reinterpret_cast<Layer*>(data);
-                    using Policy = typename Ctx::Policy;
+                    using WeightsT = typename Layer::WeightsT;
+                    constexpr int kN = WeightsT::kN, kM = WeightsT::kM, kMPerThread = WeightsT::kMPerThread;
 
                     __syncthreads();
-                    if (kThreadIdx < Layer::kM && LayerIdx != kDepth - 1)
+                    if (kThreadIdx < kM && LayerIdx != kDepth - 1)
                     {
                         // Derivative of activation at this layer (except last layer)
-                        ctx.error[kThreadIdx] *= Policy::Hyper::Activation::dF(ctx.acts[LayerIdx][kThreadIdx]);
+                        ctx.error[kThreadIdx] *= Ctx::Policy::Hyper::Activation::dF(ctx.acts[LayerIdx][kThreadIdx]);
                     }
 
                     // Backpropagate the error by the transpose of the weight matrix and cache as a temporary state
@@ -164,33 +220,34 @@ namespace Flair
 
                     // Repurpose the memory used to store the weights with the gradients of the weights
                     __syncthreads();
-                    layer.w(colIdx, rowIdx) = ctx.error[rowIdx] * ((LayerIdx == 0) ? ctx.input[colIdx] : ctx.acts[LayerIdx - 1][colIdx]);
-                    if (kThreadIdx < Layer::kN)
+                    if (kThreadIdx < kN * WeightsT::kConcurrentM)
                     {
-                        layer.b[kThreadIdx] = ctx.error[kThreadIdx];
+                        const int colIdx = kThreadIdx % kN, rowIdx = kThreadIdx / kN;
+                        for (int k = 0, r = rowIdx * kMPerThread, i = kM * colIdx + r;
+                            r < kM && k < kMPerThread;
+                            ++k, ++r, ++i)
+                        {
+                            layer.w[i] = ctx.error[r] * ((LayerIdx == 0) ? ctx.input[colIdx] : ctx.acts[LayerIdx - 1][colIdx]);
+                        }
                     }
+
+                    // Update the biases
+                    if (kThreadIdx < kM) { layer.b[kThreadIdx] = ctx.error[kThreadIdx]; }
 
                     // Update the error to its backpropagated derivative
                     __syncthreads();
-                    if (kThreadIdx < Layer::kN) { ctx.error[kThreadIdx] = ctx.state[kThreadIdx]; }
-
-                    /*if (kBlockIdx == 0)
-                    {
-                        printf("%f ", layer.w(colIdx, rowIdx));
-                    }
-                    __syncthreads();
-                    if(kBlockIdx == 0 && kThreadIdx == 0) printf("\n\n");*/
+                    if (kThreadIdx < kN) { ctx.error[kThreadIdx] = ctx.state[kThreadIdx]; }                  
                 }
             };
 
             template<typename Ctx, int LayerIdx>
-            struct BackwardRecurse<Ctx, LayerIdx, Terminator>
+            struct BackwardRecursor<Ctx, LayerIdx, Terminator>
             {
                 __forceinline__ __device__ static void F(Ctx&, float*) { }
             };
 
             template<typename RNG, typename Layer, typename... Next>
-            struct InitialiseRecurse
+            struct InitialiseRecursor
             {
                 __host__ static void F(float* data, RNG& rng)
                 {
@@ -204,44 +261,56 @@ namespace Flair
                         layer.b.ZeroGrad();
                     }
 
-                    InitialiseRecurse<RNG, Next...>::F(data + Layer::kNumParams, rng);
+                    InitialiseRecursor<RNG, Next...>::F(data + Layer::kNumParams, rng);
                 }
             };
 
             template<typename RNG>
-            struct InitialiseRecurse<RNG, Terminator>
+            struct InitialiseRecursor<RNG, Terminator>
             {
                 __host__ static void F(float* data, RNG& rng) {}
             };
 
-            __host__ void GetLayerOffsetsImpl(std::vector<int>&) {}
-            
             template<typename Layer, typename... Next>
-            __host__ void GetLayerOffsetsImpl(std::vector<int>& offsets)
-            {
-                offsets.push_back(sizeof(Layer) / sizeof(float));
-                GetLayerOffsetsImpl<Next...>(offsets);
-            }
+            struct FormatRecursor 
+            { 
+                __inline__ __host__ static std::string F(const float* data) 
+                { 
+                    const Layer& layer = *reinterpret_cast<const Layer*>(data);
+                    return "{\n" + 
+                            layer.Format() + 
+                            "}\n" + 
+                            FormatRecursor<Next...>::F(data + sizeof(Layer) / sizeof(float));
+                }
+            };
+
+            template<>
+            struct FormatRecursor<Terminator> { __inline__ __host__ static std::string F(const float*) { return ""; } };
+
 
          public:
              template<typename RNG>
              __inline__ __host__ static void Initialise(std::vector<float>& data, RNG& rng)
              {
-                 InitialiseRecurse<RNG, Layers..., Terminator>::F(data.data(), rng);
+                 InitialiseRecursor<RNG, Layers..., Terminator>::F(data.data(), rng);
              }
 
              template<typename Ctx>
              __forceinline__ __device__ static void Forward(Ctx& ctx)
              {
-                 ForwardRecurse<Ctx, 0, Layers..., Terminator>::F(ctx, ctx.mlpData);
+                 ForwardRecursor<Ctx, 0, Layers..., Terminator>::F(ctx, ctx.mlpData);
              }
 
              template<typename Ctx>
              __forceinline__ __device__ static void Backward(Ctx& ctx)
              {
-                 BackwardRecurse<Ctx, 0, Layers..., Terminator>::F(ctx, ctx.mlpData);
+                 BackwardRecursor<Ctx, 0, Layers..., Terminator>::F(ctx, ctx.mlpData);
              }
 
+             __inline__ __host__ static std::string Format(const float* data)
+             {
+                 return FormatRecursor<Layers..., Terminator>::F(data);
+             }
         };
 
     }

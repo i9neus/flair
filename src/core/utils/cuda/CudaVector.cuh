@@ -22,8 +22,8 @@ namespace Flair
             template<typename OtherType> friend std::vector<OtherType>& operator<<=(std::vector<OtherType>&, Vector<OtherType>&);
 
         private:
-            size_t              m_size;
-            Type*               cu_deviceData;
+            size_t              m_size = 0;
+            Type*               cu_deviceData = nullptr;
 
         public:
             __host__ Vector() :
@@ -50,7 +50,10 @@ namespace Flair
 
             __host__ ~Vector()
             {
-                if (cu_deviceData) { cudaFree(cu_deviceData); }
+                if (cu_deviceData) 
+                { 
+                    cudaFree(cu_deviceData); 
+                }
             }
 
             __host__ void Resize(const size_t newSize)

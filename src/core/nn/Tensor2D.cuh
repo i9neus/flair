@@ -13,7 +13,7 @@ namespace Flair
     {
         // NOTE: Tensor stored in column-major order        
     private:
-        static constexpr int kMaxThreads = 1024;
+        static constexpr int kMaxThreads = 512;
 
         union
         {
@@ -33,14 +33,22 @@ namespace Flair
             kMPerThread = DivCeil(M, kMaxThreads / N),
 
             // Number of threads per row/column
-            kNBlocks = DivCeil(N, kNPerThread),
-            kMBlocks = DivCeil(M, kMPerThread),
+            kConcurrentN = DivCeil(N, kNPerThread),
+            kConcurrentM = DivCeil(M, kMPerThread),
 
             // The number of concurrent operations (threads) required to vector multiple this tensor
-            kConcurrency = CexprMax(M * kNBlocks, N * kMBlocks),
+            kMaxConcurrency = CexprMax(M * kConcurrentN, N * kConcurrentM),
 
-            kFitIntoMaxThreads = kNPerThread == 1 && kMPerThread == 1
-        };
+            // Whether the elements of this tensor fit into the maximum number of threads
+            kFitIntoMaxThreads = kNPerThread == 1 && kMPerThread == 1,
+
+            // Whether to do bounds checking on accessor methods
+#if defined(_DEBUG)
+            kIsGuarded = 1
+#else
+            kIsGuarded = 0
+#endif
+        };        
 
     public:
         __host__ __device__ Tensor2D()
@@ -82,14 +90,67 @@ namespace Flair
         }
 #endif
 
-        __forceinline__ __host__ __device__ float& operator[](const int idx) { return rawData[idx]; }
-        __forceinline__ __host__ __device__ const float& operator[](const int idx) const { return rawData[idx]; }
-        __forceinline__ __host__ __device__ float& operator()(const int col, const int row) { return data[col][row]; }
-        __forceinline__ __host__ __device__ const float& operator()(const int col, const int row) const { return data[col][row]; }
-        __forceinline__ __host__ __device__ float& Grad(const int col, const int row) { static_assert(HasGrad, "This tensor does not have gradients."); return data[N+col][row]; }
-        __forceinline__ __host__ __device__ const float& Grad(const int col, const int row) const { static_assert(HasGrad, "This tensor does not have gradients."); return data[N+col][row]; }
-        __forceinline__ __host__ __device__ float& Grad(const int idx) { static_assert(HasGrad, "This tensor does not have gradients."); return rawData[N * M + idx]; }
-        __forceinline__ __host__ __device__ const float& Grad(const int idx) const { static_assert(HasGrad, "This tensor does not have gradients."); return rawData[N * M + idx]; }
+        __forceinline__ __host__ __device__ static void AssertValidIdx(const int idx)
+        {
+            CudaAssertFmt(idx < N * M, "Out of bounds index to Tensor2: %i >= %i x %i", idx, N, M);
+        }
+
+        __forceinline__ __host__ __device__ static void AssertValidColRow(const int col, const int row)
+        {
+            CudaAssertFmt(col < N && row < M, "Out of bounds access to Tensor2: [%i, %i] >= [%i, %i]", col, row, N, M)
+        }
+
+        __forceinline__ __host__ __device__ float& operator[](const int idx) 
+        { 
+            if (kIsGuarded) { AssertValidIdx(idx); }
+            return rawData[idx]; 
+        }
+
+        __forceinline__ __host__ __device__ const float& operator[](const int idx) const 
+        { 
+            if (kIsGuarded) { AssertValidIdx(idx); }
+            return rawData[idx];
+        }
+
+        __forceinline__ __host__ __device__ float& operator()(const int col, const int row) 
+        { 
+            if (kIsGuarded) { AssertValidColRow(col, row); }
+            return data[col][row];
+        }
+
+        __forceinline__ __host__ __device__ const float& operator()(const int col, const int row) const 
+        { 
+            if (kIsGuarded) { AssertValidColRow(col, row); }
+            return data[col][row];
+        }
+
+        __forceinline__ __host__ __device__ float& Grad(const int col, const int row) 
+        { 
+            static_assert(HasGrad, "This tensor does not have gradients."); 
+            if (kIsGuarded) { AssertValidColRow(col, row); }
+            return data[N+col][row];
+        }
+
+        __forceinline__ __host__ __device__ const float& Grad(const int col, const int row) const 
+        { 
+            if (kIsGuarded) { AssertValidColRow(col, row); }
+            static_assert(HasGrad, "This tensor does not have gradients.");
+            return data[N+col][row]; 
+        }
+
+        __forceinline__ __host__ __device__ float& Grad(const int idx) 
+        { 
+            if (kIsGuarded) { AssertValidIdx(idx); }
+            static_assert(HasGrad, "This tensor does not have gradients.");
+            return rawData[N * M + idx]; 
+        } 
+
+        __forceinline__ __host__ __device__ const float& Grad(const int idx) const 
+        { 
+            if (kIsGuarded) { AssertValidIdx(idx); }
+            static_assert(HasGrad, "This tensor does not have gradients.");
+            return rawData[N * M + idx]; 
+        }
 
         __forceinline__ __host__ __device__ float* Data() { return rawData; }
         __forceinline__ __host__ __device__ const float* Data() const { return rawData; }

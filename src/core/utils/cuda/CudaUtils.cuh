@@ -18,16 +18,14 @@
 //template<typename T> __device__ __forceinline__ T kKernelPos() { return T(typename T::kType(kKernelX), typename T::kType(kKernelY)); }
 //template<typename T> __device__ __forceinline__ T kKernelDims() { return T(typename T::kType(kKernelWidth), typename T::kType(kKernelHeight)); }
 
-//#define CUDA_DEVICE_GLOBAL_ASSERTS
-#define CUDA_DEVICE_DEBUG_ASSERTS
-
-#ifdef CUDA_DEVICE_DEBUG_ASSERTS
+#if defined(_DEBUG)
 #define IsCudaDebug() true
 #else
 #define IsCudaDebug() false
 #endif
 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__)
+
     // CUDA device-side asserts. We don't use assert() here because it's optimised out in the release build.
 #define CudaAssert(condition) \
         if(!(condition)) {  \
@@ -48,7 +46,7 @@
         }
 #define CudaAssertFmt(condition, message, ...) CudaAssertFmtImpl(condition, message"\n", __VA_ARGS__)
 
-#ifdef CUDA_DEVICE_DEBUG_ASSERTS
+#if defined(_DEBUG)
 #define CudaAssertDebug(condition) CudaAssert(condition)
 #define CudaAssertDebugMsg(condition, message) CudaAssertMsg(condition, message)
 #define CudaAssertDebugFmt(condition, message, ...) CudaAssertFmt(condition, message, __VA_ARGS__)
@@ -57,21 +55,24 @@
 #define CudaAssertDebugMsg(condition, message)
 #define CudaAssertDebugFmt(condition, message, ...)
 #endif
-#else
+
+#else // __CUDA_ARCH__
+
 #define CudaAssert(condition) Assert(condition)
 #define CudaAssertMsg(condition, message) AssertMsg(condition, message)
-#define CudaAssertFmt(condition, message, ...)  AssertMsgFmt(condition, message, __VA_ARGS__)
+#define CudaAssertFmt(condition, message, ...)  AssertFmt(condition, message, __VA_ARGS__)
 
-#ifdef CUDA_DEVICE_DEBUG_ASSERTS
+#if defined(_DEBUG)
 #define CudaAssertDebug(condition) Assert(condition)
 #define CudaAssertDebugMsg(condition, message) AssertMsg(condition, message)
-#define CudaAssertDebugFmt(condition, message, ...) AssertMsgFmt(condition, message, __VA_ARGS__)
+#define CudaAssertDebugFmt(condition, message, ...) AssertFmt(condition, message, __VA_ARGS__)
 #else
 #define CudaAssertDebug(condition)
 #define CudaAssertDebugMsg(condition, message)
 #define CudaAssertDebugFmt(condition, message, ...)
 #endif
-#endif
+
+#endif // __CUDA_ARCH__
 
 template <typename T>
 __host__ inline void CudaHostAssert(T result, char const* const func, const char* const file, const int line)

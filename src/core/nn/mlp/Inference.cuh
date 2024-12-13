@@ -50,9 +50,10 @@ namespace Flair
         template<typename Policy>
         __forceinline__ __host__ void InferBatch(InferenceKernelData<Policy> kernelData)
         {
-            constexpr int kNumThreads = Policy::Model::kConcurrency;
+            constexpr int kNumThreads = Policy::Model::kMaxConcurrency;
             AssertFmt(kNumThreads <= 1024, "Exceeded block limit of 1024 threads");
             InferBatchKernel<kNumThreads> << < Policy::Hyper::kMiniBatchSize, kNumThreads >> > (kernelData);
+            IsOk(cudaGetLastError());
         }
     }
 }

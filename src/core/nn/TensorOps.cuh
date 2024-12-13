@@ -4,14 +4,15 @@
 
 namespace Flair
 {
-    template<typename TypeT, int Size>
+    template<typename Type, int NumElements>
     class Scratchpad
     {
-    private:
-        enum : int { kSize = Size };
-        using Type = TypeT;
-        
-        Type data[kSize];
+    public:
+        using TypeT = Type;
+        __device__ constexpr static int Size() { return NumElements; }
+
+    private:        
+        Type data[NumElements];
 
     public:
         Scratchpad() = default;
@@ -19,11 +20,13 @@ namespace Flair
         template<int M> 
         __device__ Type& At(int n, int m)
         {
+            CudaAssertDebugFmt(n * M + m < NumElements, "Scratchpad access out of bounds: %i * %i + %i = %i >= %i", n, M, m, n* M + m, NumElements);
             return data[n * M + m];
         }
 
         __device__ Type& At(int n)
         {
+            CudaAssertDebugFmt(n < NumElements, "Scratchpad access out of bounds: %i >= %i", n, NumElements);
             return data[n];
         }
     };
@@ -37,18 +40,22 @@ namespace Flair
 
         using TensorT = Tensor2D<N, M, HasGrad>;
         const int rowIdx = kThreadIdx % M, colIdx = kThreadIdx / M;
-        constexpr int Shift = ((TensorT::kNBlocks & (TensorT::kNBlocks - 1)) == 0) ? 0 : 1;
+        constexpr int Shift = ((TensorT::kConcurrentN & (TensorT::kConcurrentN - 1)) == 0) ? 0 : 1;
+        const bool evalThread = kThreadIdx < TensorT::kConcurrentN * M;
 
         // If one thread maps to one tensor element, things are simpler
         if (TensorT::kNPerThread == 1)
         {
-            scratch.At<M>(colIdx, rowIdx) = X[kThreadIdx] * v[colIdx];
+            if (evalThread)
+            {
+                scratch.At<M>(colIdx, rowIdx) = X[kThreadIdx] * v[colIdx];
+            }
 
             // Reduce the coefficients. If N is a power of two, the reduce loop can run for one fewer iterations
             for (int reduceMask = 2; (reduceMask >> Shift) <= N; reduceMask <<= 1)
             {
                 __syncthreads();
-                if ((colIdx & (reduceMask - 1)) == 0 && colIdx + (reduceMask >> 1) < N)
+                if (evalThread && (colIdx & (reduceMask - 1)) == 0 && colIdx + (reduceMask >> 1) < N)
                 {
                     scratch.At<M>(colIdx, rowIdx) += scratch.At<M>(colIdx + (reduceMask >> 1), rowIdx);
                 }
@@ -58,21 +65,21 @@ namespace Flair
         {
             // Iterate over the range 
             __syncthreads();
-            if (kKernelIdx < TensorT::kNBlocks * M)
+            if (evalThread)
             {
                 float& sigma = scratch.At<M>(colIdx, rowIdx);
                 sigma = 0;
-                for (int k = 0, c = colIdx * TensorT::kNPerThread; k < TensorT::kNPerThread; ++k, ++c)
+                for (int k = 0, c = colIdx * TensorT::kNPerThread; c < N && k < TensorT::kNPerThread; ++k, ++c)
                 {
                     sigma += X(c, rowIdx) * v[c];
                 }
             }
 
             // Reduce the coefficients. 
-            for (int reduceMask = 2; (reduceMask >> Shift) <= TensorT::kNBlocks; reduceMask <<= 1)
+            for (int reduceMask = 2; (reduceMask >> Shift) <= TensorT::kConcurrentN; reduceMask <<= 1)
             {
                 __syncthreads();
-                if (kKernelIdx < TensorT::kNBlocks * M && (colIdx & (reduceMask - 1)) == 0 && colIdx + (reduceMask >> 1) < N)
+                if (evalThread && (colIdx & (reduceMask - 1)) == 0 && colIdx + (reduceMask >> 1) < TensorT::kConcurrentN)
                 {
                     scratch.At<M>(colIdx, rowIdx) += scratch.At<M>(colIdx + (reduceMask >> 1), rowIdx);
                 }
@@ -91,19 +98,23 @@ namespace Flair
         static_assert(M <= V && N <= W, "Vector dimensions must be at least as large as tensor dimensions");
 
         using TensorT = Tensor2D<N, M, HasGrad>;
-        constexpr int Shift = ((TensorT::kMBlocks & (TensorT::kMBlocks - 1)) == 0) ? 0 : 1;
-        int colIdx, rowIdx; 
+        constexpr int Shift = ((TensorT::kConcurrentM & (TensorT::kConcurrentM - 1)) == 0) ? 0 : 1;
+        const bool evalThread = kThreadIdx < N * TensorT::kConcurrentM;
+        int colIdx, rowIdx;
 
         // If one thread maps to one tensor element, things are simpler
         if (TensorT::kMPerThread == 1)
         {
             // Reduce the coefficients. If M is a power of two, the reduce loop can run for one fewer iterations
-            rowIdx = kThreadIdx % M; colIdx = kThreadIdx / M;
-            scratch.At<M>(colIdx, rowIdx) = X[kThreadIdx] * v[rowIdx];
+            if (evalThread)
+            {
+                rowIdx = kThreadIdx % M; colIdx = kThreadIdx / M;
+                scratch.At<M>(colIdx, rowIdx) = X[kThreadIdx] * v[rowIdx];
+            }
             for (int reduceMask = 2; (reduceMask >> Shift) <= M; reduceMask <<= 1)
             {
                 __syncthreads();
-                if ((rowIdx & (reduceMask - 1)) == 0 && rowIdx + (reduceMask >> 1) < M)
+                if (evalThread && (rowIdx & (reduceMask - 1)) == 0 && rowIdx + (reduceMask >> 1) < M)
                 {
                     scratch.At<M>(colIdx, rowIdx) += scratch.At<M>(colIdx, rowIdx + (reduceMask >> 1));
                 }
@@ -112,31 +123,33 @@ namespace Flair
         else
         {
             // Iterate over the range 
-            colIdx = kThreadIdx % N; rowIdx = kThreadIdx / N;
             __syncthreads();
-            if (kKernelIdx < N * TensorT::kMBlocks)
+            if (evalThread)
             {
-                float& sigma = scratch.At<M>(colIdx, rowIdx);
+                colIdx = kThreadIdx % N; rowIdx = kThreadIdx / N;
+                float& sigma = scratch.At<TensorT::kConcurrentM>(colIdx, rowIdx);
                 sigma = 0;
-                for (int k = 0, r = rowIdx * TensorT::kMPerThread; k < TensorT::kMPerThread; ++k, ++r)
+                for (int k = 0, r = rowIdx * TensorT::kMPerThread, i = M * colIdx + r;
+                    r < M && k < TensorT::kMPerThread;
+                    ++k, ++r)
                 {
-                    sigma += X(colIdx, r) * v[r];
+                    sigma += X[i] * v[r];
                 }
             }
 
             // Reduce the coefficients. If N is a power of two, the reduce loop can run for one fewer iterations
-            for (int reduceMask = 2; (reduceMask >> Shift) <= TensorT::kMBlocks; reduceMask <<= 1)
+            for (int reduceMask = 2; (reduceMask >> Shift) <= TensorT::kConcurrentM; reduceMask <<= 1)
             {
                 __syncthreads();
-                if (kKernelIdx < N * TensorT::kMBlocks && (rowIdx & (reduceMask - 1)) == 0 && rowIdx + (reduceMask >> 1) < M)
+                if (evalThread && (rowIdx & (reduceMask - 1)) == 0 && rowIdx + (reduceMask >> 1) < TensorT::kConcurrentM)
                 {
-                    scratch.At<M>(colIdx, rowIdx) += scratch.At<M>(colIdx, rowIdx + (reduceMask >> 1));
+                    scratch.At<TensorT::kConcurrentM>(colIdx, rowIdx) += scratch.At<TensorT::kConcurrentM>(colIdx, rowIdx + (reduceMask >> 1));
                 }
             }
         }
 
         __syncthreads();
-        if (rowIdx == 0) { w[colIdx] = scratch.At<M>(colIdx, 0); }
+        if (rowIdx == 0) { w[colIdx] = scratch.At<TensorT::kConcurrentM>(colIdx, 0); }
     }
 
     // Matrix multiply of the transpose of an NxM tensor with K-tensor. 

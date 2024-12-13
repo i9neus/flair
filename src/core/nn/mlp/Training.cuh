@@ -50,7 +50,7 @@ namespace Flair
             return ctx.scratch.At(0);
         }
 
-        template<int N, typename ScratchpadT>
+        /*template<int N, typename ScratchpadT>
         __inline__ __device__ float NormaliseTensor(Tensor1D<N>& tensor, ScratchpadT& scratch)
         {
             __syncthreads();
@@ -78,28 +78,26 @@ namespace Flair
             }
 
             return scratch.At<N>(0);
-        }
+        }*/
 
         /**
             Reduces accumulated gradients and loss values over the mini batch and stores them in the 0th layer
         **/
-        template<int NumThreads, typename Policy>
+        template<typename Policy>
         __global__ void EstimateGradientsKernel(TrainingKernelData<Policy> kernelData, const int miniBatchOffset)
         {
-            __shared__ TrainingCtx<Policy> ctx;            
+            __shared__ TrainingCtx<Policy> ctx;             
             using Model = typename Policy::Model;
 
             // If the element of the mini-batch overruns the batch size
             if (miniBatchOffset + kBlockIdx >= kernelData.batchSize) { return; }
             
             // Copy MLP data out of global memory into shared memory. 
-            for (int paramIdx = kThreadIdx; paramIdx < Model::kNumParams; paramIdx += NumThreads)
+            for (int paramIdx = kThreadIdx; paramIdx < Model::kNumParams; paramIdx += kBlockDim)
             {
                 ctx.mlpData[paramIdx] = kernelData.mlpModelData[paramIdx];   
             }
             ctx.loss = 0;
-
-            //if (kThreadIdx == 0) printf("%f\n", ctx.mlpData[0]);
 
             __syncthreads();
 
@@ -115,39 +113,31 @@ namespace Flair
             }
 
             // Feed forward pass
-            Model::Forward(ctx);        
+            Model::Forward(ctx);     
 
             // Calculate the loss and error for the last layer
-            ctx.loss = EstimateLoss(ctx);
+            ctx.loss = EstimateLoss(ctx);         
 
             // Back propagate error and accumulate gradients
             Model::Backward(ctx);
 
             // Copy the estimated gradients back into global memory                
             __syncthreads();
-            for (int paramIdx = kThreadIdx; paramIdx < Model::kNumParams; paramIdx += NumThreads)
+            for (int paramIdx = kThreadIdx; paramIdx < Model::kNumParams; paramIdx += kBlockDim)
             {
                 kernelData.mlpGradData[kBlockIdx * Model::kNumParams + paramIdx] = ctx.mlpData[paramIdx];
             }
             kernelData.sampleLosses[kBlockIdx] = ctx.loss;
         }
 
-        template<typename Policy>
-        __forceinline__ __host__ void EstimateGradients(TrainingKernelData<Policy> kernelData, const int miniBatchOffset)
-        {
-            constexpr int kNumThreads = Policy::Model::kConcurrency;
-            AssertFmt(kNumThreads <= 1024, "Exceeded block limit of 1024 threads");
-            EstimateGradientsKernel<kNumThreads> << < Policy::Hyper::kMiniBatchSize, kNumThreads >> > (kernelData, miniBatchOffset);
-        }
-
         /**
             Reduces accumulated gradients and loss values over the mini batch and stores them in the 0th layer
         **/
-        template<int NumThreads, typename Policy>
+        template<typename Policy>
         __global__ void ReduceGradientsKernel(TrainingKernelData<Policy> kernelData, const int stride, const int miniBatchOffset)
         {
             constexpr int kMiniBatchSize = Policy::Hyper::kMiniBatchSize;
-            const int kernelIdx = blockIdx.x * NumThreads + threadIdx.x;
+            const int kernelIdx = kKernelIdx;
             const int destIdx = (kernelIdx / Policy::Model::kNumParams) * stride;
             const int srcIdx = destIdx + (stride >> 1);
 
@@ -175,11 +165,17 @@ namespace Flair
                  
                 //if(paramIdx == 0) printf("%i: %f\n", stride, kernelData.mlpGradData[destIdx * Policy::Model::kNumParams + paramIdx]);
             }
-        }
+        }   
 
         template<typename Policy>
-        __forceinline__ __host__ void ReduceGradients(TrainingKernelData<Policy> kernelData, const int miniBatchOffset)
+        __forceinline__ __host__ void EstimateGradients(TrainingKernelData<Policy> kernelData, const int miniBatchOffset)
         {
+            // Estimate the gradients for each element in the mini-batch
+            AssertFmt(Policy::Model::kMaxConcurrency <= 1024, "Exceeded block limit of 1024 threads");
+            EstimateGradientsKernel << < Policy::Hyper::kMiniBatchSize, Policy::Model::kMaxConcurrency >> > (kernelData, miniBatchOffset);
+            IsOk(cudaGetLastError());
+
+            // Reduce the gradients
             constexpr int kMiniBatchSize = Policy::Hyper::kMiniBatchSize;
             if (kMiniBatchSize > 1)
             {
@@ -188,11 +184,13 @@ namespace Flair
                     constexpr int kNumThreads = 256;
                     const int kNumParams = Policy::Model::kNumParams * kMiniBatchSize / stride;
                     const int kNumBlocks = (kNumParams + kNumThreads - 1) / kNumThreads;
-                    
-                    ReduceGradientsKernel<kNumThreads> << <kNumBlocks, kNumThreads >> > (kernelData, stride, miniBatchOffset);
+
+                    ReduceGradientsKernel << <kNumBlocks, kNumThreads >> > (kernelData, stride, miniBatchOffset);
+                    IsOk(cudaGetLastError());
                 }
             }
-        }         
+        }
+
 
         template<typename Policy>
         __global__ void PrepareNewEpochKernel(TrainingKernelData<Policy> kernelData)
@@ -206,6 +204,7 @@ namespace Flair
         {
             AssertFmt(Policy::Hyper::kMiniBatchSize <= 1024, "Exceeded block limit of 1024 threads");
             PrepareNewEpochKernel << < 1, Policy::Hyper::kMiniBatchSize >> > (kernelData);
+            IsOk(cudaGetLastError());
         }
     }
 }

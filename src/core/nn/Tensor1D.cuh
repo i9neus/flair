@@ -13,8 +13,19 @@ namespace Flair
 
         float data[SizeType<N, HasGrad>::Value];
 
+
     public:
-        enum : int { kN = N, kElements = SizeType<N, HasGrad>::Value };
+        enum : int 
+        { 
+            kN = N, 
+            kSize = SizeType<N, HasGrad>::Value ,
+
+#if defined(_DEBUG)
+            kIsGuarded = 1
+#else
+            kIsGuarded = 0
+#endif
+        };
 
         __host__ __device__ Tensor1D()
         {
@@ -29,11 +40,10 @@ namespace Flair
             ZeroGrad();
         }
 
-        /*__host__ __device__ Tensor1D(const float(&d)[N][1])
+        __host__ __device__ Tensor1D(const float& value)
         {
-            memcpy(data, &d[0][0], sizeof(float) * N);
-            ZeroGrad();
-        }*/
+            *this = value;
+        }
 
         template<typename RNG>
         __host__ void Initialise(RNG& rng)
@@ -54,10 +64,36 @@ namespace Flair
         }
 #endif
 
-        __forceinline__ __host__ __device__ float& operator[](const int idx) { return data[idx]; }
-        __forceinline__ __host__ __device__ const float& operator[](const int idx) const { return data[idx]; }
-        __forceinline__ __host__ __device__ float& Grad(const int idx) { static_assert(HasGrad, "This tensor does not have gradients."); return data[N + idx]; }
-        __forceinline__ __host__ __device__ const float& Grad(const int idx) const { static_assert(HasGrad, "This tensor does not have gradients."); return data[N+idx]; }
+        __forceinline__ __host__ __device__ static void AssertValidIdx(const int idx)
+        {
+            CudaAssertDebugFmt(idx < N, "Out of bounds index to Tensor1: %i >= %i", idx, N);
+        }
+
+        __forceinline__ __host__ __device__ float& operator[](const int idx) 
+        {
+            if (kIsGuarded) { AssertValidIdx(idx); }
+            return data[idx]; 
+        }
+
+        __forceinline__ __host__ __device__ const float& operator[](const int idx) const 
+        { 
+            if (kIsGuarded) { AssertValidIdx(idx); }
+            return data[idx];
+        }
+
+        __forceinline__ __host__ __device__ float& Grad(const int idx) 
+        { 
+            static_assert(HasGrad, "This tensor does not have gradients.");
+            if (kIsGuarded) { AssertValidIdx(idx); }
+            return data[N + idx];
+        }
+
+        __forceinline__ __host__ __device__ const float& Grad(const int idx) const 
+        { 
+            static_assert(HasGrad, "This tensor does not have gradients.");
+            if (kIsGuarded) { AssertValidIdx(idx); }
+            return data[N+idx];
+        }
 
         __forceinline__ __host__ __device__ float* Data() { return data; }
         __forceinline__ __host__ __device__ const float* Data() const { return data; }
@@ -92,6 +128,7 @@ namespace Flair
         CwiseScalarUnaryOp(-=)
         CwiseScalarUnaryOp(*=)
         CwiseScalarUnaryOp(/=)
+        CwiseScalarUnaryOp(=)
 
 #undef CwiseScalarUnaryOp
 

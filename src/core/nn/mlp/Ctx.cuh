@@ -75,7 +75,7 @@ namespace Flair
             Tensor1D<Policy::Model::kMaxWidth>      acts[Policy::Model::kDepth];    // Cached per-layer activations required during the forward/backward passes
             float                                   loss;   
 
-            Scratchpad<float, Policy::Model::kConcurrency> scratch;               // Scratch memory for accumulating values during tensor multiplication
+            Scratchpad<float, Policy::Model::kMaxConcurrency> scratch;               // Scratch memory for accumulating values during tensor multiplication
         };
 
         template<typename PolicyT>
@@ -86,8 +86,8 @@ namespace Flair
             __host__ __device__ InferenceCtx() {}
 
             float                                           mlpData[Policy::Model::kNumParams];
-            Tensor1D<Policy::Model::kMaxWidth, false>       state;
-            Scratchpad<float, Policy::Model::kConcurrency>  scratch;
+            Tensor1D<Policy::Model::kMaxWidth, false>       state, error;
+            Scratchpad<float, Policy::Model::kMaxConcurrency>  scratch;
             int                                             batchSize;
         };      
     }

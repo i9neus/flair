@@ -21,12 +21,15 @@ namespace Flair
         using ActivationFunction = Activation::LeakyReLU; 
 
         using LossFunction = Loss::L1;
+        //using LossFunction = Loss::L2;
+        //using LossFunction = Loss::BinaryCrossEntropy;
 
         using OptimiserFunction = Optimiser::Adam<LearningRate>;
         //using OptimiserFunction = Optimiser::SGD<LearningRate>;
 
-        //using Model = LinearSequential<Linear<36, 36>, Linear<36, 31>, Linear<31, 27>>;
-        using Model = LinearSequential<Linear<16, 16>, Linear<16, 16>, Linear<16, 16>>;
+        //using Model = LinearSequential<Linear<36, 50>, Linear<50, 50>, Linear<50, 40>, Linear<40, 27>>;
+        using Model = LinearSequential<Linear<36, 36>, Linear<36, 36>, Linear<36, 31>, Linear<31, 27>>;
+        //using Model = LinearSequential<Linear<16, 16>, Linear<16, 16>, Linear<16, 16>>;
 
         using Policy = MLPPolicy<Model, HyperParameters<kMiniBatchSize, ActivationFunction, LossFunction, OptimiserFunction>>;
         
@@ -37,13 +40,20 @@ namespace Flair
 
         void MLP::Initialise()
         {
-        }        
+        }             
 
         void MLP::Train(const std::vector<InputSample>& inputSamples, const std::vector<OutputSample>& targetSamples)
         {
-            Assert(inputSamples.size() == targetSamples.size());            
+            Assert(inputSamples.size() == targetSamples.size());
 
-            printf_red("TrainingCtx: %i bytes\n", sizeof(TrainingCtx<Policy>));
+            constexpr size_t kSharedMemorySafeMargin = 1024;
+            const size_t ctxSize = sizeof(TrainingCtx<Policy>);
+            cudaDeviceProp prop;
+            IsOk(cudaGetDeviceProperties(&prop, 0));
+
+            AssertFmt(ctxSize < prop.sharedMemPerBlock - kSharedMemorySafeMargin, "Model context exceeds capacity of shared memory.");
+
+            printf_red("TrainingCtx: %i bytes\n", ctxSize);
 
             Cuda::Vector<float> deviceGradData(Policy::Hyper::kMiniBatchSize * Policy::Model::kNumParams);
             Cuda::Vector<InputSample> deviceInputSamples(inputSamples.size());
@@ -54,16 +64,23 @@ namespace Flair
             // Determininstically initialise the mini-batch weights and the optimiser 
             std::vector<float> hostModelData(Model::kNumParams);
             auto rng = NormalRandomDistribution(0, 0.5f, std::hash<int>{}(0));
+            //auto rng = Ones();
             Model::Initialise(hostModelData, rng);
             m_deviceModelData <<= hostModelData;
 
             // Create and initialise the optimiser
             Cuda::Vector<float> deviceOptimiserData(Policy::Model::kNumParams * 2);
             deviceOptimiserData.Fill(0);
+            deviceGradData.Fill(0);
+
+            /*std::vector<InputSample> tempInput(inputSamples.size(), InputSample(0));
+            std::vector<OutputSample> tempTarget(targetSamples.size(), OutputSample(0));
+            for (auto& f : tempInput) { f = inputSamples.front(); }
+            for (auto& f : tempTarget) { f = targetSamples.front(); }*/
 
             // Upload the samples
             deviceInputSamples <<= inputSamples;
-            deviceTargetSamples <<= targetSamples;           
+            deviceTargetSamples <<= targetSamples;
 
             // Create random indirection buffer
             Permutation sampleIdxs(inputSamples.size());
@@ -81,7 +98,7 @@ namespace Flair
             kernelData.miniBatchLoss = deviceMiniBatchLoss.GetDeviceData();
             kernelData.batchSize = inputSamples.size();
 
-            constexpr int kMaxEpochs = 200;
+            constexpr int kMaxEpochs = 500;
             constexpr int kMaxMiniBatches = std::numeric_limits<int>::max();
             int miniBatchIdx = 0;
             HighResTimer kernelTimer, lossTimer;
@@ -106,9 +123,6 @@ namespace Flair
                     // Estimate the gradients
                     EstimateGradients(kernelData, sampleIdx);
 
-                    // Reduce gradients 
-                    ReduceGradients(kernelData, sampleIdx);      
-
                     // Optimiser step
                     Descend(kernelData);
 
@@ -126,7 +140,6 @@ namespace Flair
                 meanLoss /= std::ceil(kernelData.batchSize / float(Policy::Hyper::kMiniBatchSize));
                 epochLoss.emplace_back(miniBatchIdx, meanLoss);
 
-                //meanLoss = deviceLoss.Download();// / std::ceil(kernelData.batchSize / float(Policy::kMiniBatchSize));
                 if (lossTimer.Get() > 1. / 3)
                 { 
                     printf("Epoch %i: L1 = %.10f\n", epochIdx, meanLoss); 
@@ -136,7 +149,24 @@ namespace Flair
 
                 // Shuffle the indirection indices
                 sampleIdxs.Shuffle();
+                
+                /*if (epochIdx == 0 || epochIdx == kMaxEpochs - 1)
+                {
+                    std::vector<float> gradData;
+                    gradData <<= deviceGradData;
+                    //gradData <<= m_deviceModelData;
+                    std::printf("\n\n\n\n%i\n----------------\n%s\n\n", miniBatchIdx, Model::Format(gradData.data()).c_str());
 
+                    // Print optimisers data
+                    gradData <<= deviceOptimiserData;
+                    for (auto f : gradData)
+                    {
+                        std::printf("%.3f ", f);
+                    }
+                    std::printf("\n");
+                }*/
+
+                // Print sample indices
                 /*std::vector<int>& idxs = sampleIdxs.GetHostData();
                 printf("%i: ", epochIdx);
                 for (auto& i : idxs) { printf("%i ", i); }

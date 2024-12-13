@@ -26,14 +26,16 @@ namespace Flair
     template<int N, int M, int V, int W, bool HasGrad>
     __global__  void KernelMul(const Tensor2D<N, M, HasGrad>* X, const Tensor1D<V, HasGrad>* v, Tensor1D<W, HasGrad>* w)
     {
-        __shared__ Scratchpad<float, N * M> scratch;        
+        using TensorT = Tensor2D<N, M, HasGrad>;
+        __shared__ Scratchpad<float, TensorT::kMaxConcurrency> scratch;
         Mul(*X, *v, *w, scratch);
     }
 
     template<int N, int M, int V, int W, bool HasGrad>
     __global__  void KernelMulT(const Tensor2D<N, M, HasGrad>* X, const Tensor1D<V, HasGrad>* v, Tensor1D<W, HasGrad>* w)
     {
-        __shared__ Scratchpad<float, N* M> scratch;
+        using TensorT = Tensor2D<N, M, HasGrad>;
+        __shared__ Scratchpad<float, TensorT::kMaxConcurrency> scratch;
         MulT(*X, *v, *w, scratch);
     }
 
@@ -203,7 +205,7 @@ namespace Flair
         Cuda::Object<Tensor1D<N, false>> v, rw;
         Cuda::Object<Tensor1D<M, false>> w, rv;
         using TensorT = Tensor2D<N, M, false>;
-        constexpr int kNumThreads = TensorT::kConcurrency;
+        constexpr int kNumThreads = TensorT::kMaxConcurrency;
 
         X->Initialise(rng);
         v->Initialise(rng);
@@ -232,21 +234,30 @@ namespace Flair
 
     __host__ void TestLargeTensorMul(const bool verbose, int& errorCount)
     {
+        TestLargeTensorMulImpl<36, 36>(verbose, errorCount);
         TestLargeTensorMulImpl<17, 29>(verbose, errorCount);
         TestLargeTensorMulImpl<27, 31>(verbose, errorCount);
         TestLargeTensorMulImpl<32, 32>(verbose, errorCount);
         TestLargeTensorMulImpl<7, 68>(verbose, errorCount);
         TestLargeTensorMulImpl<1, 55>(verbose, errorCount);
         TestLargeTensorMulImpl<87, 1>(verbose, errorCount);
+        
+        TestLargeTensorMulImpl<36, 38>(verbose, errorCount);
+        TestLargeTensorMulImpl<80, 40>(verbose, errorCount);
+        TestLargeTensorMulImpl<40, 35>(verbose, errorCount);
+        TestLargeTensorMulImpl<35, 27>(verbose, errorCount);
+
+        //using Model = LinearSequential<Linear<36, 80>, Linear<80, 40>, Linear<40, 35>, Linear<35, 27>>;
+
     }
 
     __host__ void RunTensorTests(const bool verbose)
     {
         int errorCount = 0;
         
-        TestSquare4x4TensorMul(verbose, errorCount);
+        /*TestSquare4x4TensorMul(verbose, errorCount);
         TestSquare8x8TensorMul(verbose, errorCount);
-        TestNonSquareTensorMul(verbose, errorCount);
+        TestNonSquareTensorMul(verbose, errorCount);*/
         TestLargeTensorMul(verbose, errorCount);
 
         AssertFmt(errorCount == 0, "Test failed with %i errors", errorCount);

@@ -104,6 +104,7 @@ namespace Flair
             {
                 const int kNumBlocks = (m_deviceIndices.Size() + 255) / 256;
                 FillSequentialKernel << <kNumBlocks, 256 >> > (m_deviceIndices.GetDeviceData(), m_deviceIndices.Size());
+                IsOk(cudaGetLastError());
                 IsOk(cudaDeviceSynchronize());
             }
 
@@ -114,6 +115,7 @@ namespace Flair
                 const int offset = m_rng(m_mt) % m_deviceIndices.Size();
                 const int kNumBlocks = (m_deviceIndices.Size() + 255) / 256;
                 ShuffleKernel << < kNumBlocks, 256 >> > (m_swap.GetDeviceData(), m_deviceIndices.GetDeviceData(), m_deviceIndices.Size(), offset);
+                IsOk(cudaGetLastError());
                 IsOk(cudaDeviceSynchronize());
                 
                 Swap(m_swap, m_deviceIndices);
