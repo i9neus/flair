@@ -12,6 +12,7 @@ namespace Flair
     protected:
         std::mt19937 m_mt;
 
+        ContinuousRandomVariable() : m_mt(0) {}
         ContinuousRandomVariable(const uint32_t seed) : m_mt(seed) { }
 
     public:
@@ -26,6 +27,7 @@ namespace Flair
         float m_lower, m_upper;
 
     public:
+        UniformDistribution() : UniformDistribution(0, 1, 0) {}
         UniformDistribution(const float lower, const float upper, const uint32_t seed = 0) : ContinuousRandomVariable(seed), m_lower(lower), m_upper(upper) {}
         virtual float operator()() override final { return mix(m_lower, m_upper, m_rng(m_mt)); }
     };
@@ -38,6 +40,7 @@ namespace Flair
         std::normal_distribution<float> m_rng;
 
     public:
+        NormalRandomDistributionImpl() : NormalRandomDistributionImpl(0, 1, 0) {}
         NormalRandomDistributionImpl(const float mean, const float sigma, const uint32_t seed = 0) : ContinuousRandomVariable(seed), m_rng(mean, sigma) {}
         virtual float operator()() override final 
         { 

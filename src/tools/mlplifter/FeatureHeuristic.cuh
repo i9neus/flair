@@ -31,57 +31,66 @@ namespace Flair
     };
     
     // Measures the variance of the image in a 3x3 window centered around the pixel at x,y
-    class VarianceHeuristic : public FeatureHeuristic<VarianceHeuristic>
+    template<int KernelSize>
+    class VarianceHeuristic : public FeatureHeuristic<VarianceHeuristic<KernelSize>>
     {
+    private:
+        enum : int 
+        { 
+            kKernelRadius = KernelSize / 2, 
+            kKernelArea = KernelSize * KernelSize
+        };
+
     public:
         VarianceHeuristic() = delete;
 
         static float EvaluatePixel(const Image1f& inputImage, const int x, const int y)
         {
             float m = 0, m2 = 0;
-            for (int v = -1; v <= 1; ++v)
+            for (int v = -kKernelRadius; v <= kKernelRadius; ++v)
             {
-                for (int u = -1; u <= 1; ++u)
+                for (int u = -kKernelRadius; u <= kKernelRadius; ++u)
                 {
                     const float f = inputImage.Sample(x + u, y + v);
                     m += f;
                     m2 += f * f;
                 }
             }
-            float var = m2 / 9 - sqr(m / 9); // Variance
+            float var = m2 / kKernelArea - sqr(m / kKernelArea); // Variance
             var = std::pow(var, 0.6f); // Mix
             //var = std::sqrt(var); // Standard deviation
 
             return var;
         }
     };
-    
+
     // 2D discrete cosine transform with quadratic time complexity 
-    class DCTFeatureHeuristic : public FeatureHeuristic<DCTFeatureHeuristic>
+    template<int KernelSize>
+    class DCTFeatureHeuristic : public FeatureHeuristic<DCTFeatureHeuristic<KernelSize>>
     {
     private:
-        enum : int { kNumCoeffs = 4, kNumCoeffsSqr = kNumCoeffs * kNumCoeffs };
-        using ValueTable = std::array<float, kNumCoeffsSqr>;
+        enum : int { kKernelRadius = KernelSize / 2, kKernelArea = KernelSize * KernelSize };
+        using ValueTable = std::array<float, kKernelArea>;
 
     private:
         static ValueTable GetValueTable(const Image1f& inputImage, const int x, const int y)
         {
             ValueTable values;
             float meanVal = 0;
-            for (int v = -kNumCoeffs / 2 + 1, i = 0; v <= kNumCoeffs / 2; ++v)
+            for (int v = -kKernelRadius + 1, i = 0; v <= kKernelRadius; ++v)
             {
-                for (int u = -kNumCoeffs / 2 + 1; u <= kNumCoeffs / 2; ++u, ++i)
+                for (int u = -kKernelRadius + 1; u <= kKernelRadius; ++u, ++i)
                 {
                     // The DCT requires a 4x4 grid however we only want 3x3. Clamp the pixel coordinates to the so that we don't accidentally 
                     // sample pixels belonging to features that fall outside of the input window of the NN model
-                    values[i] = inputImage.Sample(x + std::min(kNumCoeffs / 2 - 1, u), y + std::min(kNumCoeffs / 2 - 1, v));
+                    values[i] = inputImage.Sample(x + std::min(kKernelRadius - 1, u), y + std::min(kKernelRadius - 1, v));
                     //values[i] = inputImage.Sample(x + u, y + v);
                     meanVal += values[i];
                 }
             }
-            
+
             // Normalise the values based on the mean
-            meanVal /= kNumCoeffsSqr;
+            meanVal /= kKernelArea;
             for (auto& v : values) { v /= std::max(1e-3f, meanVal); }
 
             return values;
@@ -89,27 +98,27 @@ namespace Flair
 
         static ValueTable ForwardDCT2D(const ValueTable& values)
         {
-            // Dumb n^2 complexity DCT. Requires 256 iterations per pixel for a window size of 4x4. 
+            // Dumb n^2 complexity DCT. Requires kKernelArea^2 iterations per pixel for a window size of . 
             // TODO: Optimise using Cooley-Tukey to get complexity down to linearithmic complexity.
             ValueTable coeffs;
-            for (int l = 0, i = 0; l < kNumCoeffs; ++l)
+            for (int l = 0, i = 0; l < KernelSize; ++l)
             {
-                for (int m = 0; m < kNumCoeffs; ++m, ++i)
+                for (int m = 0; m < KernelSize; ++m, ++i)
                 {
                     float sigma = 0., mean = 0.;
                     float norm = (1. + float(l)) * (1. + float(m));
-                    for (int v = -kNumCoeffs / 2, j = 0; v < kNumCoeffs / 2; ++v)
+                    for (int v = -kKernelRadius, j = 0; v < kKernelRadius; ++v)
                     {
-                        for (int u = -kNumCoeffs / 2; u < kNumCoeffs / 2; ++u, ++j)
+                        for (int u = -kKernelRadius; u < kKernelRadius; ++u, ++j)
                         {
-                            float coeff = cos(kTwoPi * float(l) * 0.5 * (float(u + kNumCoeffs / 2) + 0.5) / float(kNumCoeffs)) *
-                                cos(kTwoPi * float(m) * 0.5 * (float(v + kNumCoeffs / 2) + 0.5) / float(kNumCoeffs)) * norm;
+                            float coeff = cos(kTwoPi * float(l) * 0.5 * (float(u + kKernelRadius) + 0.5) / float(KernelSize)) *
+                                cos(kTwoPi * float(m) * 0.5 * (float(v + kKernelRadius) + 0.5) / float(KernelSize)) * norm;
 
                             sigma += values[j] * coeff;
                         }
                     }
                     if (i != 0) sigma /= coeffs[0];
-                    coeffs[i] = sigma / (float(kNumCoeffsSqr));
+                    coeffs[i] = sigma / (float(kKernelArea));
                 }
             }
             return coeffs;
@@ -125,13 +134,13 @@ namespace Flair
 
             // Measure the variance
             float m = 0., m2 = 0.;
-            for (int i = 1; i < kNumCoeffsSqr; ++i)
+            for (int i = 1; i < kKernelArea; ++i)
             {
                 m += abs(coeffs[i]);
                 m2 += sqr((coeffs[i]));
             }
-            m /= float(kNumCoeffsSqr - 1);
-            m2 /= float(kNumCoeffsSqr - 1);
+            m /= float(kKernelArea - 1);
+            m2 /= float(kKernelArea - 1);
             const float var = m2 - sqr(m);
 
             // The final heuristic is the sum of the standard deviation and the mean, normalised by the DC coefficient

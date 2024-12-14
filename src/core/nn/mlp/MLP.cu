@@ -21,15 +21,11 @@ namespace Flair
         using ActivationFunction = Activation::LeakyReLU; 
 
         using LossFunction = Loss::L1;
-        //using LossFunction = Loss::L2;
-        //using LossFunction = Loss::BinaryCrossEntropy;
 
         using OptimiserFunction = Optimiser::Adam<LearningRate>;
         //using OptimiserFunction = Optimiser::SGD<LearningRate>;
 
-        //using Model = LinearSequential<Linear<36, 50>, Linear<50, 50>, Linear<50, 40>, Linear<40, 27>>;
-        using Model = LinearSequential<Linear<36, 36>, Linear<36, 36>, Linear<36, 31>, Linear<31, 27>>;
-        //using Model = LinearSequential<Linear<16, 16>, Linear<16, 16>, Linear<16, 16>>;
+        using Model = LinearSequential<Linear<35, 35>, Linear<35, 35>, Linear<35, 30>, Linear<30, 25>>;
 
         using Policy = MLPPolicy<Model, HyperParameters<kMiniBatchSize, ActivationFunction, LossFunction, OptimiserFunction>>;
         
@@ -98,7 +94,7 @@ namespace Flair
             kernelData.miniBatchLoss = deviceMiniBatchLoss.GetDeviceData();
             kernelData.batchSize = inputSamples.size();
 
-            constexpr int kMaxEpochs = 100;
+            constexpr int kMaxEpochs = 50;
             constexpr int kMaxMiniBatches = std::numeric_limits<int>::max();
             int miniBatchIdx = 0;
             HighResTimer kernelTimer, lossTimer;
@@ -124,7 +120,10 @@ namespace Flair
                     EstimateGradients(kernelData, sampleIdx);
 
                     // Optimiser step
-                    Descend(kernelData);
+                    if (epochIdx > 0)
+                    {
+                        Descend(kernelData);
+                    }
 
                     IsOk(cudaDeviceSynchronize());
                     totalTime += kernelTimer.Get();
@@ -140,7 +139,7 @@ namespace Flair
                 meanLoss /= std::ceil(kernelData.batchSize / float(Policy::Hyper::kMiniBatchSize));
                 epochLoss.emplace_back(miniBatchIdx, meanLoss);
 
-                if (lossTimer.Get() > 1. / 3)
+                if (epochIdx == 0 || lossTimer.Get() > 1. / 3)
                 { 
                     printf("Epoch %i: L1 = %.10f\n", epochIdx, meanLoss); 
                     lossTimer.Reset();

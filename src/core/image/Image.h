@@ -135,10 +135,19 @@ namespace Flair
         {
             if (InterpolationType == kImageBilinear)
             {
+                // For interpolation, we assume that the pixel values are defined at the mid-point of each logcal pixel
+                // and that the values are clamped at the boundaries.
+                //  
+                // Example: for a 2 pixel image in 1 dimensions, values p[0] and p[1] correspond to coordinates 0.25 and 0.75 respectively
+                // 
+                // 0.0      0.5       1.0
+                //  |   *    |    *    |
+                //     p[0]     p[1]
+                 
                 int iu, iv;
                 float du, dv;
-                u = std::max(0.f, u * (m_width - 1));
-                v = std::max(0.f, v * (m_height - 1));
+                u = std::max(0.f, u * m_width - 0.5f);
+                v = std::max(0.f, v * m_height - 0.5f);
                 if (u >= m_width - 1) { iu = m_width - 2; du = 1; }
                 else { iu = int(u); du = fract(u); }
                 if (v >= m_height - 1) { iv = m_height - 2; dv = 1; }
@@ -156,8 +165,8 @@ namespace Flair
             }
             if (InterpolationType == kImageNearest)
             {
-                int idx = Channels * (clamp(int(v * m_height), 0, m_height - 1) * m_width +
-                                      clamp(int(u * m_width), 0, m_width - 1));
+                int idx = Channels * (clamp(int(v * m_height - 0.5), 0, m_height - 1) * m_width +
+                                      clamp(int(u * m_width - 0.5), 0, m_width - 1));
 
                 for (int c = 0; c < Channels; ++c, ++idx)
                 {
@@ -199,6 +208,7 @@ namespace Flair
             }
         }
 
+        // Sets all pixels in the image to zero
         void Erase() { std::memset(m_data.data(), 0, sizeof(Type) * m_data.size()); }
 
         void Saturate() { for (auto& p : m_data) { p = saturate(p); } }
