@@ -156,8 +156,8 @@ namespace Flair
             }
             if (InterpolationType == kImageNearest)
             {
-                int idx = Channels * (clamp(int(v * (m_height - 1)), 0, m_height - 1) * m_width +
-                                      clamp(int(u * (m_width - 1)), 0, m_width - 1));
+                int idx = Channels * (clamp(int(v * m_height), 0, m_height - 1) * m_width +
+                                      clamp(int(u * m_width), 0, m_width - 1));
 
                 for (int c = 0; c < Channels; ++c, ++idx)
                 {

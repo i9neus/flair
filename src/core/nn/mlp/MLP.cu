@@ -63,7 +63,7 @@ namespace Flair
 
             // Determininstically initialise the mini-batch weights and the optimiser 
             std::vector<float> hostModelData(Model::kNumParams);
-            auto rng = NormalRandomDistribution(0, 0.5f, std::hash<int>{}(0));
+            auto rng = NormalRandomDistribution(0, 1.f, std::hash<int>{}(0));
             //auto rng = Ones();
             Model::Initialise(hostModelData, rng);
             m_deviceModelData <<= hostModelData;
@@ -98,7 +98,7 @@ namespace Flair
             kernelData.miniBatchLoss = deviceMiniBatchLoss.GetDeviceData();
             kernelData.batchSize = inputSamples.size();
 
-            constexpr int kMaxEpochs = 500;
+            constexpr int kMaxEpochs = 100;
             constexpr int kMaxMiniBatches = std::numeric_limits<int>::max();
             int miniBatchIdx = 0;
             HighResTimer kernelTimer, lossTimer;
