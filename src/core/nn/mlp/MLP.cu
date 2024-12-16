@@ -16,16 +16,20 @@ namespace Flair
         // The size of the mini batch
         static constexpr int kMiniBatchSize = 64;
 
-        using LearningRate = std::ratio<1, 1000>;
 
         using ActivationFunction = Activation::LeakyReLU; 
 
         using LossFunction = Loss::L1;
 
-        using OptimiserFunction = Optimiser::Adam<LearningRate>;
-        //using OptimiserFunction = Optimiser::SGD<LearningRate>;
+        using LearningRate = std::ratio<1, 100>;
+        
+        //using LRDecay = Optimiser::NullDecaySchedule;
+        using LRDecay = Optimiser::ExponentialDecaySchedule<std::ratio<95, 100>>;
 
-        using Model = LinearSequential<Linear<35, 35>, Linear<35, 35>, Linear<35, 30>, Linear<30, 25>>;
+        using OptimiserFunction = Optimiser::Adam<LearningRate, LRDecay>;
+        //using OptimiserFunction = Optimiser::SGD<LearningRate, LRDecay>;
+
+        using Model = LinearSequential<Linear<35, 35>, Linear<35, 35>, Linear<35, 35>, Linear<35, 35>>;
 
         using Policy = MLPPolicy<Model, HyperParameters<kMiniBatchSize, ActivationFunction, LossFunction, OptimiserFunction>>;
         
@@ -122,7 +126,7 @@ namespace Flair
                     // Optimiser step
                     if (epochIdx > 0)
                     {
-                        Descend(kernelData);
+                        Descend(kernelData, epochIdx);
                     }
 
                     IsOk(cudaDeviceSynchronize());

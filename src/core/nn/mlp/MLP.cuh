@@ -18,7 +18,7 @@ namespace Flair
         {
         public:
             using InputSample = Tensor1D<35, false>;
-            using OutputSample = Tensor1D<25, false>;
+            using OutputSample = Tensor1D<35, false>;
             using ReadBatchFunctor = std::function<bool(std::vector<InputSample>&, const int)>;
             using WriteBatchFunctor = std::function<void(const std::vector<OutputSample>&, const int)>;
 
