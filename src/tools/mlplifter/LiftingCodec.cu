@@ -5,6 +5,7 @@
 #include "core/math/wavelets/2d/StaticDWT2.h"
 #include "core/utils/ConsoleUtils.h"
 #include "core/utils/ThreadUtils.h"
+#include "core/io/IOUtils.h"
 #include "core/image/ImageOps.h"
 #include "FeatureHeuristic.cuh"
 #include <numeric>
@@ -71,36 +72,31 @@ namespace Flair
     {
         //return (value - mean) / mean;
         //return value - mean;
-        return value;
+        return 2. * value - 1.0;
+        //return value;
     }
 
     __host__ __inline__ float MapInverse(const float value, const float mean)
     {
         //return value * mean + mean;
         //return value + mean;
-        return value;
+        return (value + 1.0) / 2.0;
+        //return value;
     }
 
-    __host__ std::tuple<LiftingCodec::InputSample, float, float, float> LiftingCodec::GenerateInputSample(const float x, const float y, UniformDistribution* uniform) const
+    __host__ std::tuple<LiftingCodec::InputSample, float> LiftingCodec::GenerateInputSample(const int x, const int y) const
     {
         InputSample sample;
         float mean = 0;
-        auto it = sample.begin();
-        float p = 0, q = 0;
-        if (uniform)
-        {
-            p = (*uniform)();
-            q = (*uniform)();
-        }
+        auto it = sample.begin();   
 
         // First 5x5 samples contain pixel values
-        for (int j = -2; j <= 2; ++j)
+        for (int j = -2; j < 4; ++j)
         {
-            for (int i = -2; i <= 2; ++i, ++it)
+            for (int i = -2; i < 4; ++i, ++it)
             {
-                float u = (x + i + p + 0.5) / float(m_mipMap[1].Width());
-                float v = (y + j + q + 0.5) / float(m_mipMap[1].Height());
-                const float f = m_mipMap[1].Sample<kImageBilinear>(u, v);
+                const float f = m_mipMap[1].Sample(x + i, y + j);
+                //const float f = float(std::sqrt(float(i * i) + float(j * j)) <= 2);
                 *it = f;
                 mean += f;
             }
@@ -108,38 +104,27 @@ namespace Flair
         
         // Normalise the samples
         it = sample.begin();
-        mean = std::max(1e-3f, mean / 25);
-        for (int i = 0; i < 25; ++i, ++it)
+        mean = std::max(1e-3f, mean / 36);
+        for (int i = 0; i < 36; ++i, ++it)
         {
             *it = MapForward(*it, mean);
-        }
-        
-        // Remaining 10 samples contain positional encoding of jittered offsets
-        for (int i = 0; i < 5; ++i)
-        {
-            sample[25 + i] = 0;// std::cos(kPi * float(i + 1) * (p + fract(x)));
-            sample[25 + 5 + i] = 0;// std::cos(kPi * float(i + 1) * (q + fract(y)));
-        }     
+        }      
 
-        return { sample, mean, p, q};
+        return { sample, mean };
     }
 
-    __host__ LiftingCodec::OutputSample LiftingCodec::GenerateTargetSample(const float x, const float y, const std::tuple<InputSample, float, float, float>& inputSample) const
+    __host__ LiftingCodec::OutputSample LiftingCodec::GenerateTargetSample(const int x, const int y, const std::tuple<InputSample, float>& inputSample) const
     {
         const float mean = std::get<1>(inputSample);
-        // Jitter interval of 1 at mip level 2 correcponds to an interval of 2 at this level
-        const float p = std::get<2>(inputSample) * 2;
-        const float q = std::get<3>(inputSample) * 2;
 
         OutputSample sample;
         auto it = sample.begin();
-        for (int j = -2; j <= 2; ++j)
+        for (int j = -2; j < 4; ++j)
         {
-            for (int i = -2; i <= 2; ++i, ++it)
+            for (int i = -2; i < 4; ++i, ++it)
             {
-                float u = (x + i + p + 0.5) / float(m_mipMap[0].Width());
-                float v = (y + j + q + 0.5) / float(m_mipMap[0].Height());
-                const float f = m_mipMap[0].Sample<kImageBilinear>(u, v);
+                const float f = m_mipMap[0].Sample(x + i, y + j);
+                //const float f = float(std::sqrt(float(i * i) + float(j * j)) <= 2);
                 *it = MapForward(f, mean);
             }
         }
@@ -153,11 +138,11 @@ namespace Flair
         inputMeans.clear();
         targetSamples.clear();        
 
-        float maxFeatureVal;
         //using Heuristic = DCTFeatureHeuristic<5>;
-        using Heuristic = VarianceHeuristic<5>;
+        using Heuristic = VarianceHeuristic<7>;
 
-        Heuristic::Classify(m_mipMap[0], ImageRect(0, 0, m_mipMap[0].Width(), m_mipMap[0].Height()), m_heuristicImage, maxFeatureVal);
+        float maxFeatureVal;
+        Heuristic::Classify(m_mipMap[1], ImageRect(0, 0, m_mipMap[1].Width(), m_mipMap[1].Height()), m_heuristicImage, maxFeatureVal);
 
         // Create empty histograms
         constexpr int kPDFSize = 100;
@@ -167,8 +152,8 @@ namespace Flair
         // Bucket each pixel based on its relative variance
         m_heuristicImage.Map([&](const int x, const int y, float* pixel)
             {
-                //float importance = saturate(std::pow(*pixel / maxFeatureVal, 0.5f) * 2.f);
-                float importance = saturate(*pixel / maxFeatureVal);
+                //float importance = saturate(std::pow(*pixel / maxFeatureVal, 0.4f) * 2.f);
+                float importance = saturate(std::pow(*pixel / maxFeatureVal, 1.f));
                 const int bucketIdx = clamp(int(kPDFSize * importance), 0, kPDFSize - 1);
                 histogram[bucketIdx].emplace_back(uint16_t(x), uint16_t(y));
             });
@@ -205,7 +190,8 @@ namespace Flair
             inline int RandInt()                { return rng(mt); }
         };
 
-        constexpr int kNumSamples = 100000;
+        //const int kNumSamples = sqr(m_mipMap[1].Width());
+        constexpr int kNumSamples = 1024;
 
         Threaded<ThreadCtx> runner(std::min(16, kNumSamples));
         runner.Initialise([&](ThreadCtx& ctx, int i, int N)
@@ -215,7 +201,6 @@ namespace Flair
                 ctx.uniform = UniformDistribution(0.0, 0.5, std::hash<int>{}(i * 9871 + seed));
             });
 
-        std::atomic<int> numSamples(0);
         Threaded<ThreadCtx>::Functor sampleFunctor = [&](ThreadCtx& ctx, int i, int N)
         {
             const int numThreadSamples = (kNumSamples * (i + 1) / N) - (kNumSamples * (i) / N);
@@ -223,7 +208,7 @@ namespace Flair
             ctx.inputMeans.resize(numThreadSamples);
             ctx.targetSamples.resize(numThreadSamples);
 
-            for (int sampleIdx = 0; sampleIdx < numThreadSamples; ++sampleIdx)
+            for (int sampleIdx = 0, j = kNumSamples * i / N; sampleIdx < numThreadSamples; ++sampleIdx, ++j)
             {
                 std::vector<std::pair<uint16_t, uint16_t>>* bucket = nullptr;
                 do
@@ -238,16 +223,22 @@ namespace Flair
 
                 // Draw a sample from the bucket (coordinates in mipmap level 0)
                 auto [x, y] = (*bucket)[ctx.RandInt() % bucket->size()];
-                //const int x = ctx.RandInt() % m_mipMap[0].Width();
-                //const int y = ctx.RandInt() % m_mipMap[0].Height();
+                
+                // Random sample the image
+                //const int x = ctx.RandInt() % m_mipMap[1].Width();
+                //const int y = ctx.RandInt() % m_mipMap[1].Height();
+                
+                // Sequentially sample the image
+                //const int x = j % m_mipMap[1].Width();
+                //const int y = j / m_mipMap[1].Width();
 
                 // Construct the input sample
-                auto inputSample = GenerateInputSample(x * 0.5, y * 0.5, nullptr);// &ctx.uniform);
+                auto inputSample = GenerateInputSample(x, y);
                 ctx.inputSamples[sampleIdx] = std::get<0>(inputSample);
                 ctx.inputMeans[sampleIdx] = std::get<1>(inputSample);
 
                 // ...and the target sample
-                ctx.targetSamples[sampleIdx] = GenerateTargetSample(x, y, inputSample);
+                ctx.targetSamples[sampleIdx] = GenerateTargetSample(x * 2, y * 2, inputSample);
             }
         };
         runner.RunSerial(sampleFunctor);
@@ -268,15 +259,16 @@ namespace Flair
         //std::swap(waveletImage, m_heuristicImage);
     }
 
-    template<typename SampleType>
-    __host__ int RenderSampleBlock(Image1f& image, const SampleType& sample, int x, int y)
+    template<int Size>
+    __host__ int RenderSampleBlock(Image1f& image, const Tensor1D<Size>& sample, int x, int y)
     {
+        const int kEdge = std::sqrt(Size);
         auto inputIt = sample.begin();
-        for (int k = 0; k < SampleType::kN; ++k, ++inputIt)
+        for (int k = 0; k < Size; ++k, ++inputIt)
         {
-            image.At(x + k % 5, y + k / 5)[0] = *inputIt;
+            image.At(x + k % kEdge, y + k / kEdge)[0] = *inputIt;
         }
-        return 5;
+        return 8;
     }
 
     __host__ void LiftingCodec::DrawSamples(Image1f& image, const LiftingCodec::InputSampleList& inputSamples, const LiftingCodec::OutputSampleList& targetSamples, const LiftingCodec::OutputSampleList& outputSamples) const
@@ -310,9 +302,75 @@ namespace Flair
         }
     }
 
+    __host__ void LiftingCodec::SerialiseTrainingSet(const LiftingCodec::InputSampleList& inputSamples, const LiftingCodec::OutputSampleList& targetSamples) const
+    {
+        const char* kFilePath = "C:/projects/probenet/src/experiments/flair/dataset.dat";
+        std::ofstream file(kFilePath, std::ios::binary);
+        Assert(file.is_open());
+        
+        for (int i = 0; i < inputSamples.size(); ++i)
+        {
+            file.write(reinterpret_cast<const char*>(&inputSamples[i][0]), sizeof(float) * InputSample::kN);
+            file.write(reinterpret_cast<const char*>(&targetSamples[i][0]), sizeof(float) * OutputSample::kN);
+        }
+        
+        printf_green("Wrote %i sample pairs to '%s'!\n", inputSamples.size(), kFilePath);
+        file.close();
+    }
+
+    __host__ void LiftingCodec::DeserialiseTrainingSet(LiftingCodec::InputSampleList& inputSamples, LiftingCodec::OutputSampleList& targetSamples) const
+    {
+        const char* kFilePath = "C:/projects/probenet/src/experiments/flair/dataset.dat";
+        std::vector<float> rawData;
+        Assert(IO::DeserialiseArray(rawData, kFilePath) != 0);
+        Assert(rawData.size() % (InputSample::kN + OutputSample::kN) == 0);
+
+        const int kNumSamples = rawData.size() / (InputSample::kN + OutputSample::kN);
+        inputSamples.resize(kNumSamples);
+        targetSamples.resize(kNumSamples);
+
+        for (int sampleIdx = 0, rawIdx = 0; sampleIdx < kNumSamples; ++sampleIdx)
+        {
+            std::memcpy(inputSamples[sampleIdx].Data(), &rawData[rawIdx], sizeof(float) * InputSample::kN);
+            rawIdx += InputSample::kN;
+            std::memcpy(targetSamples[sampleIdx].Data(), &rawData[rawIdx], sizeof(float) * OutputSample::kN);
+            rawIdx += OutputSample::kN;
+        }
+
+        printf_green("Loaded %i samples from '%s'!\n", inputSamples.size(), kFilePath);
+    }
+
+    __host__ LiftingCodec::OutputSampleList LiftingCodec::DeserialiseInferenceDataset() const
+    {
+        const char* kFilePath = "C:/projects/probenet/src/experiments/flair/inference.dat";
+        std::ifstream file(kFilePath, std::ios::in | std::ios::binary);
+        Assert(file.is_open());
+
+        file.seekg(0, std::ios::end);
+        const int fileSize = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        Assert(fileSize % sizeof(float) == 0);
+        Assert((fileSize / sizeof(float)) % OutputSample::kN == 0);
+
+        OutputSampleList samples;
+        samples.resize(fileSize / (sizeof(float) * OutputSample::kN));         
+        file.read(reinterpret_cast<char*>(samples.data()), fileSize);
+
+        return samples;
+    }
+
     __host__ Image3f LiftingCodec::Encode(const Image3f& inputImage)
     { 
-        //RunTensorTests(true);
+        constexpr bool kTrainMLP = true;
+        constexpr bool kShowPytorchRef = false;
+        constexpr bool kInferImageCoeffs = false;
+        constexpr bool kCollaborative = false;
+        constexpr bool kTestInference = true;
+        constexpr bool kSignedColourView = true;
+        
+        RunTensorTests(false);
+        //return inputImage;
         
         Image3f gammaImage = inputImage;
 
@@ -344,24 +402,32 @@ namespace Flair
         InputSampleList inputSamples;
         OutputSampleList targetSamples, outputSamples;
         std::vector<float> inputMeans;
-        GenerateTrainingSet(8783652, inputSamples, inputMeans, targetSamples);
+        //GenerateTrainingSet(8783652, inputSamples, inputMeans, targetSamples);
+
+        //inputSamples.resize(1);
+        //targetSamples.resize(1);
+
+        //SerialiseTrainingSet(inputSamples, targetSamples);
+        DeserialiseTrainingSet(inputSamples, targetSamples);
+
+        //for (auto& f : inputSamples) { f = 1; }
+        //for (auto& f : targetSamples) { f = 0.5f; }
 
         ////////////////////////////////////////////////////////////////////////////////////////
 
         printf("Training MLP...\n");
         NN::MLP mlp;
-        mlp.Train(inputSamples, targetSamples);        
+        if (kTrainMLP)
+        {
+            mlp.Train(inputSamples, targetSamples);
+        }
 
-        ////////////////////////////////////////////////////////////////////////////////////////
-
-        constexpr bool kInferImageCoeffs = true;
-        constexpr bool kCollaborative = false;
-        constexpr bool kTestInference = false;
+        ////////////////////////////////////////////////////////////////////////////////////////        
 
         if (kInferImageCoeffs)
         {
             const int kSamplesPerBatch = 10000;
-            const int kNumPixels = m_mipMap[0].Area();
+            const int kNumPixels = m_mipMap[1].Area();
             auto readSamples = [&](std::vector<InputSample>& samples, const int batchIdx) -> bool
             {
                 if (batchIdx >= kNumPixels)
@@ -376,8 +442,8 @@ namespace Flair
                     inputMeans.clear();
                     for (int miniBatchIdx = 0, pixelIdx = batchIdx; miniBatchIdx < kSamplesPerBatch && pixelIdx < kNumPixels; ++miniBatchIdx, ++pixelIdx)
                     {
-                        const int x = pixelIdx % m_mipMap[0].Width(), y = pixelIdx / m_mipMap[0].Width();
-                        auto [sample, mean, p, q] = GenerateInputSample(x * 0.5, y * 0.5, nullptr);
+                        const int x = pixelIdx % m_mipMap[1].Width(), y = pixelIdx / m_mipMap[1].Width();
+                        auto [sample, mean] = GenerateInputSample(x, y);
                         samples.push_back(sample);
                         inputMeans.push_back(mean);
                     }
@@ -387,25 +453,30 @@ namespace Flair
 
             auto writeSamples = [&](const std::vector<OutputSample>& samples, int batchIdx) -> void
             {
-                for (int sampleIdx = 0, pixelIdx = batchIdx; sampleIdx < samples.size(); ++sampleIdx, ++pixelIdx)
+                auto sample = samples.cbegin();
+                for (int sampleIdx = 0, pixelIdx = batchIdx; sampleIdx < samples.size(); ++sampleIdx, ++pixelIdx, ++sample)
                 {
-                    auto sampleIt = samples[sampleIdx].begin();
-                    const int x = pixelIdx % m_mipMap[0].Width();
-                    const int y = pixelIdx / m_mipMap[0].Width();
+                     const int x = pixelIdx % m_mipMap[1].Width(), y = pixelIdx / m_mipMap[1].Width();
 
                     if (!kCollaborative)
                     {
-                        *chnlData.At(x, y) = MapInverse(samples[sampleIdx][12], inputMeans[sampleIdx]);
+                        for (int v = 0; v < 2; ++v)
+                        {
+                            for (int u = 0; u < 2; ++u)
+                            {
+                                *chnlData.At(x*2+u, y*2+v) = MapInverse((*sample)[(2+v)*6 + (2+u)], inputMeans[sampleIdx]);
+                            }
+                        }                        
                     }
                     else
                     {
-                        for (int v = -1, i = 7; v <= 1; ++v, i += 2)
+                        for (int v = -2, i = 0; v < 4; ++v)
                         {
-                            for (int u = -1; u <= 1; ++u, ++i)
+                            for (int u = -2; u < 4; ++u, ++i)
                             {
-                                if (chnlData.Contains(x + u, y + v))
+                                if (chnlData.Contains(x*2 + u, y*2 + v))
                                 {
-                                    *chnlData.At(x + u, y + v) += MapInverse(samples[sampleIdx][i], inputMeans[sampleIdx]);
+                                    *chnlData.At(x*2+u, y*2+v) += MapInverse((*sample)[(2+v)*6 + (2+u)], inputMeans[sampleIdx]);
                                 }
                             }
                         }
@@ -426,6 +497,14 @@ namespace Flair
                 // Normalise the accumulated values
                 chnlData.ParallelMap([&](int x, int y, int, float* pixel) { *pixel /= 9; });
             }
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////
+
+        if (kShowPytorchRef)
+        {
+            outputSamples = DeserialiseInferenceDataset();
+            DrawSamples(chnlData, inputSamples, targetSamples, outputSamples);
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////
@@ -455,18 +534,24 @@ namespace Flair
 
         ////////////////////////////////////////////////////////////////////////////////////////
 
-        /*waveletImage.Erase();     
+        waveletImage.Erase();
         waveletImage.Resize(chnlData);
-        waveletImage.ParallelMap([&](const int x, const int y, const int, float* pixel)
-            {
-                const float& c = chnlData.At(x, y)[0];
-                pixel[(c < 0) ? 0 : 1] = std::pow(std::abs(c), 2.0f);
-            }); */
-        
-        //chnlData.ApplyGamma(2.2f);
-        for (int i = 0; i < 3; ++i)
+
+        if (kSignedColourView)
         {
-            waveletImage.EmplaceChannel(chnlData, i);
+            waveletImage.ParallelMap([&](const int x, const int y, const int, float* pixel)
+                {
+                    const float& c = chnlData.At(x, y)[0];
+                    pixel[(c < 0) ? 0 : 1] = std::pow(std::abs(c), 2.0f);
+                });
+        }
+        else
+        {
+            //chnlData.ApplyGamma(2.2f);
+            for (int i = 0; i < 3; ++i)
+            {
+                waveletImage.EmplaceChannel(chnlData, i);
+            }
         }
 
         /*waveletImage.Resize(m_heuristicImage);

@@ -17,13 +17,13 @@ namespace Flair
         class MLP
         {
         public:
-            using InputSample = Tensor1D<35, false>;
-            using OutputSample = Tensor1D<35, false>;
+            using InputSample = Tensor1D<36, false>;
+            using OutputSample = Tensor1D<36, false>;
             using ReadBatchFunctor = std::function<bool(std::vector<InputSample>&, const int)>;
             using WriteBatchFunctor = std::function<void(const std::vector<OutputSample>&, const int)>;
 
         private:
-            Cuda::Vector<float>  m_deviceModelData;
+            Cuda::Vector<float>  m_computeModelData;
 
         public:
             MLP();
@@ -31,6 +31,7 @@ namespace Flair
             void Initialise();
             void Train(const std::vector<InputSample>&, const std::vector<OutputSample>&);
             void Infer(ReadBatchFunctor readBatch, WriteBatchFunctor writeBatch);
+            void PrintGradients(const Cuda::Vector<float>& grads) const;
         };
     }  
 }

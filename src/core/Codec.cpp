@@ -70,7 +70,7 @@ namespace Flair
     {
         m_params.flags |= flags;     
 
-        AssertMsg(m_params.minCompressedPrecinct >= 1, "minCompressedPrecinct must be >= 1");
+        AssertFmt(m_params.minCompressedPrecinct >= 1, "minCompressedPrecinct must be >= 1");
     }
 
     void Codec::SetEncoderParams(const Params& params)
@@ -84,7 +84,7 @@ namespace Flair
         m_height = height;
         m_area = m_width * m_height;
         
-        AssertMsg(m_width == m_height, "Codec only supports square images.");
+        AssertFmt(m_width == m_height, "Codec only supports square images.");
         int bitsSet = 0;
         for (int i = 0; i < 31; ++i) { bitsSet += ((m_width & (1 << i)) != 0); }
         AssertFmt(bitsSet == 1, "Codec only supports image dimensions in powers of two (input is %i x %i) %i", m_width, m_height, bitsSet);
@@ -128,7 +128,7 @@ namespace Flair
         m_params.flags = image.header.encoderFlags;
         
 
-        AssertMsg(m_width == m_height, "Codec only supports square images.");
+        AssertFmt(m_width == m_height, "Codec only supports square images.");
         int bitsSet = 0;
         for (int i = 0; i < 31; ++i) { bitsSet += ((m_width & (1 << i)) != 0); }
         AssertFmt(bitsSet == 1, "Codec only supports image dimensions in powers of two (input is %i x %i) %i", m_width, m_height, bitsSet);

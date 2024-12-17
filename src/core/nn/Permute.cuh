@@ -46,39 +46,42 @@ namespace Flair
         class Permutation
         {
         private:
-            Cuda::Vector<int>                           m_deviceIndices;
+            Cuda::Vector<int>                           m_computeIndices;
             std::vector<int>                            m_hostIndices;
             Cuda::Vector<int>                           m_swap;
             std::mt19937                                m_mt;
             std::uniform_int_distribution<int>          m_rng;
 
         public:
-            Permutation(const int size, const uint32_t seed = 0) : 
+            Permutation(const ComputeDevice targetDevice, const int size, const uint32_t seed = 0) : 
                 m_mt(seed),
                 m_hostIndices(size),
-                m_swap(size)
+                m_computeIndices(targetDevice),
+                m_swap(targetDevice, size)
             {
-                m_deviceIndices <<= m_hostIndices;
-                m_hostIndices <<= m_deviceIndices;
+                m_computeIndices <<= m_hostIndices;
+                m_hostIndices <<= m_computeIndices;
             }
 
             __host__ std::vector<int>& GetHostData()
             {
-                m_hostIndices <<= m_deviceIndices;
+                m_hostIndices <<= m_computeIndices;
                 return m_hostIndices; 
             }
 
-            __host__ int* GetDeviceData() { return m_deviceIndices.GetDeviceData(); }
-            __host__ const int* GetDeviceData() const { return m_deviceIndices.GetDeviceData(); }
+            __host__ void To(const ComputeDevice computeDevice) { m_computeIndices.To(computeDevice); }
+
+            __host__ int* GetComputeData() { return m_computeIndices.GetComputeData(); }
+            __host__ const int* GetComputeData() const { return m_computeIndices.GetComputeData(); }
 
             // Check that the each index in the vector maps to one and only one other element 
             __host__ void CheckBijective()
             {
-                m_hostIndices <<= m_deviceIndices;
+                m_hostIndices <<= m_computeIndices;
                 std::set<int> numbers;
                 for (auto& i : m_hostIndices)
                 {
-                    AssertMsg(numbers.find(i) == numbers.end(), "Map is not bijective!");
+                    AssertFmt(numbers.find(i) == numbers.end(), "Map is not bijective!");
                     numbers.emplace(i);
                 }
                 printf_green("Map is bijective!\n");
@@ -96,29 +99,48 @@ namespace Flair
                     Swap(m_hostIndices[i], m_hostIndices[j]);
                 }
 
-                //CheckBijective(m_deviceIndices);
-                m_deviceIndices <<= m_hostIndices;
+                //CheckBijective(m_computeIndices);
+                m_computeIndices <<= m_hostIndices;
             }
 
             __host__ void Sequential()
             {
-                const int kNumBlocks = (m_deviceIndices.Size() + 255) / 256;
-                FillSequentialKernel << <kNumBlocks, 256 >> > (m_deviceIndices.GetDeviceData(), m_deviceIndices.Size());
-                IsOk(cudaGetLastError());
-                IsOk(cudaDeviceSynchronize());
+                if (m_computeIndices.IsCUDA())
+                {
+                    const int kNumBlocks = (m_computeIndices.Size() + 255) / 256;
+                    FillSequentialKernel << <kNumBlocks, 256 >> > (m_computeIndices.GetComputeData(), m_computeIndices.Size());
+                    IsOk(cudaGetLastError());
+                    IsOk(cudaDeviceSynchronize());
+                }
+                else
+                {
+                    for (int i = 0; i < m_computeIndices.Size(); ++i) { m_computeIndices[i] = i; }
+                }
             }
 
             __host__ void Shuffle()
             {
-                m_swap.Resize(m_deviceIndices.Size());
+                m_swap.Resize(m_computeIndices.Size());
+                const int offset = m_rng(m_mt) % m_computeIndices.Size();
                 
-                const int offset = m_rng(m_mt) % m_deviceIndices.Size();
-                const int kNumBlocks = (m_deviceIndices.Size() + 255) / 256;
-                ShuffleKernel << < kNumBlocks, 256 >> > (m_swap.GetDeviceData(), m_deviceIndices.GetDeviceData(), m_deviceIndices.Size(), offset);
-                IsOk(cudaGetLastError());
-                IsOk(cudaDeviceSynchronize());
+                if (m_computeIndices.IsCUDA())
+                {
+                    const int kNumBlocks = (m_computeIndices.Size() + 255) / 256;
+                    ShuffleKernel << < kNumBlocks, 256 >> > (m_swap.GetComputeData(), m_computeIndices.GetComputeData(), m_computeIndices.Size(), offset);
+                    IsOk(cudaGetLastError());
+                    IsOk(cudaDeviceSynchronize());
+                }
+                else
+                {
+                    for (int i = 0; i < m_computeIndices.Size(); ++i)
+                    {
+                        m_swap[i] = (m_computeIndices[m_computeIndices[i]] + offset) % m_computeIndices.Size();
+                    }
+                }
                 
-                Swap(m_swap, m_deviceIndices);
+                Swap(m_swap, m_computeIndices);
+
+                //CheckBijective();
             }
         };
     }

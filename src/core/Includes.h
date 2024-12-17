@@ -28,17 +28,20 @@ namespace Flair
             throw std::runtime_error(tfm::format("%s in %s (%d)", #condition, __FILE__, __LINE__)); \
         }
 
-#define AssertMsg(condition, message) \
-        if(!(condition)) {  \
-            throw std::runtime_error(tfm::format("%s in %s (%d)", message, __FILE__, __LINE__)); \
-        }
-
 #define AssertFmt(condition, message, ...) \
         if(!(condition)) {  \
             char buffer[1024]; \
             std::snprintf(buffer, 1024, message, __VA_ARGS__); \
             throw std::runtime_error(tfm::format("%s in %s (%d)", buffer, __FILE__, __LINE__)); \
         }
+
+#if defined(_DEBUG)
+    #define AssertDebug(condition) Assert(condition)
+    #define AssertDebugFmt(condition, message, ...) AssertFmt(condition, message, __VA_ARGS__)
+#else
+    #define AssertDebug(condition)
+    #define AssertDebugFmt(condition, message, ...)
+#endif
 
     using MagicType = uint32_t;
 }

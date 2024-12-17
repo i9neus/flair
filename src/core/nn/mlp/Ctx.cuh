@@ -20,7 +20,7 @@ namespace Flair
 
             enum : int 
             { 
-                kMiniBatchSize = MiniBatchSize 
+                kMiniBatchSize = int(MiniBatchSize)
             };
 
             __host__ static void AssertValid()
@@ -29,19 +29,31 @@ namespace Flair
             }
         };
 
-        template<typename ModelT, typename HyperT>
+#define STANDARD_TYPE_CHECK_CTOR(ClassName) \
+        ClassName() \
+        { \
+            static_assert(std::is_standard_layout<ClassName>::value, #ClassName " is not standard layout type"); \
+        }
+
+        
+        template<ComputeDevice ComputeTargetT, typename ModelT, typename EvaluatorT, typename HyperT>
         struct MLPPolicy
         {
+            static constexpr ComputeDevice kComputeDevice = ComputeTargetT;
             using Hyper = HyperT;
             using Model = ModelT;
+            using Evaluator = EvaluatorT;
         }; 
         
         template<typename Policy>
         struct TrainingKernelData
         {           
+            __device__ __host__ STANDARD_TYPE_CHECK_CTOR(TrainingKernelData)
+            
             float*                                  mlpModelData = nullptr;
             float*                                  mlpGradData = nullptr;
             Tensor1D<Policy::Model::kInputWidth>*   inputSamples = nullptr;
+            Tensor1D<Policy::Model::kOutputWidth>*  outputSamples = nullptr;
             Tensor1D<Policy::Model::kOutputWidth>*  targetSamples = nullptr;
             float*                                  optimiserData = nullptr;
             int*                                    sampleIdxs = nullptr;
@@ -53,6 +65,8 @@ namespace Flair
         template<typename Policy>
         struct InferenceKernelData
         {           
+            __device__ __host__ STANDARD_TYPE_CHECK_CTOR(InferenceKernelData)
+
             float*                                  mlpModelData = nullptr;
             Tensor1D<Policy::Model::kInputWidth>*   inputSamples = nullptr;
             Tensor1D<Policy::Model::kOutputWidth>*  outputSamples = nullptr;
@@ -62,10 +76,9 @@ namespace Flair
         template<typename PolicyT>
         struct TrainingCtx
         {
+            __device__ __host__ STANDARD_TYPE_CHECK_CTOR(TrainingCtx)
+
             using Policy = PolicyT;
-            
-            __device__ TrainingCtx() {}
-            __device__ TrainingCtx(const TrainingCtx&) = delete;
 
             float                                   mlpData[Policy::Model::kNumParams]; // The model weights and biases
             Tensor1D<Policy::Model::kInputWidth>    input;                          // The input sample for this eval
@@ -83,7 +96,7 @@ namespace Flair
         {
             using Policy = PolicyT;
 
-            __host__ __device__ InferenceCtx() {}
+            __device__ __host__ STANDARD_TYPE_CHECK_CTOR(InferenceCtx)
 
             float                                           mlpData[Policy::Model::kNumParams];
             Tensor1D<Policy::Model::kMaxWidth, false>       state, error;

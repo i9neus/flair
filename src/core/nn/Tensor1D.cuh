@@ -48,7 +48,8 @@ namespace Flair
         template<typename RNG>
         __host__ void Initialise(RNG& rng)
         {
-            const float norm = std::sqrt(1.0f / N);
+            const float norm = kRoot2 * std::sqrt(1.0f / N);
+            //const float norm = std::sqrt(1.f / N);
             for (int i = 0; i < N; ++i) 
             { 
                 data[i] = rng() * norm;
@@ -83,6 +84,14 @@ namespace Flair
         { 
             if (kIsGuarded) { AssertValidIdx(idx); }
             return data[idx];
+        }
+
+        // Allows assignment between tensors of unequal lengths
+        template<int OtherN, bool OtherHasGrad>
+        __forceinline__ __host__ __device__ Tensor1D& operator=(const Tensor1D<OtherN, OtherHasGrad>& rhs)
+        {
+            for (int i = 0; i < N && i < otherN; ++i) { data[i] = rhs[i]; }
+            return *this;
         }
 
         __forceinline__ __host__ __device__ float& Grad(const int idx) 
@@ -166,24 +175,24 @@ namespace Flair
 
 #undef CwiseScalarBinaryOp
 
-        __host__ __device__ void Print(const bool showGrad = false) const
+        __host__ __device__ void Print(const bool showGrad = false, const bool scientific = true) const
         {
-            CudaAssertMsg(!showGrad || HasGrad, "Tensor does not have gradients to print");
+            CudaAssertFmt(!showGrad || HasGrad, "Tensor does not have gradients to print");
             printf("{ ");
             for (int rowIdx = 0; rowIdx < N; ++rowIdx)
             {
-                printf("%s%.8f", rowIdx ? ", " : "", data[showGrad ? (N + rowIdx) : rowIdx]);
+                printf(scientific ? "%s%.4e" : "%s%.8", rowIdx ? ", " : "", data[showGrad ? (N + rowIdx) : rowIdx]);
             }
             printf(" }\n");
         }
 
-        __host__ std::string Format(const bool showGrad = false) const
+        __host__ std::string Format(const bool showGrad = false, const bool scientific = true) const
         {
-            CudaAssertMsg(!showGrad || HasGrad, "Tensor does not have gradients to format");
+            CudaAssertFmt(!showGrad || HasGrad, "Tensor does not have gradients to format");
             std::string str = "{ ";
             for (int rowIdx = 0; rowIdx < N; ++rowIdx)
             {
-                str += tfm::format("%s%.8f", rowIdx ? ", " : "", data[showGrad ? (N + rowIdx) : rowIdx]);
+                str += tfm::format(scientific ? "%s%.4e" : "%s%.8", rowIdx ? ", " : "", data[showGrad ? (N + rowIdx) : rowIdx]);
 
             }
             str += " }";

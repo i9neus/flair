@@ -28,10 +28,12 @@ add_executable(mlplifter
     src/core/nn/ContinuousRandomVariable.cuh
     src/core/nn/Permute.cuh
     src/core/nn/MLP/LinearSequential.cuh
+    src/core/nn/MLP/LinearSequentialCPU.cuh
     src/core/nn/MLP/MLP.cu
     src/core/nn/MLP/MLP.cuh
     src/core/nn/MLP/Ctx.cuh
     src/core/nn/MLP/Training.cuh
+    src/core/nn/MLP/TrainingCPU.cuh
     src/core/nn/MLP/Inference.cuh
     src/core/nn/MLP/Optimiser.cuh
     src/core/nn/MLP/Propagate.cuh
@@ -44,7 +46,7 @@ add_executable(mlplifter
     src/core/math/wavelets/1d/LiftingDWT1.h
     src/core/math/wavelets/2d/StaticDWT2.h
     src/tests/cuda/TensorTests.cuh
-    src/tests/cuda/TensorTests.cu
+    src/tests/cuda/TensorTests.cu 
 )
 
 target_compile_features(mlplifter PUBLIC cxx_std_17)

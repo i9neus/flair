@@ -10,7 +10,7 @@ namespace Flair
     template<int Channels>
     static float ComputeMSE(const Image<float, Channels>& approxImage, const Image<float, Channels>& referenceImage)
     {
-        AssertMsg(approxImage.Width() == referenceImage.Width() && approxImage.Height() == referenceImage.Height(), "Images are not the same size.");
+        AssertFmt(approxImage.Width() == referenceImage.Width() && approxImage.Height() == referenceImage.Height(), "Images are not the same size.");
 
         double mse = 0;
         const float* approxData = approxImage.Data();
@@ -36,7 +36,7 @@ namespace Flair
     template<int Channels>
     static float ComputePSNR(const Image<float, Channels>& approxImage, const Image<float, Channels>& referenceImage)
     {
-        AssertMsg(approxImage.Width() == referenceImage.Width() && approxImage.Height() == referenceImage.Height(), "Images are not the same size.");
+        AssertFmt(approxImage.Width() == referenceImage.Width() && approxImage.Height() == referenceImage.Height(), "Images are not the same size.");
 
         const float* approxData = approxImage.Data();
         const float* refData = referenceImage.Data();
@@ -69,9 +69,9 @@ namespace Flair
     // Compute the structural similarity index between two images
     static float ComputeSSIM(const Image1f& approxImage, const Image1f& referenceImage, const int patchSize, const int patchStride)
     {
-        AssertMsg(approxImage.Width() == referenceImage.Width() && approxImage.Height() == referenceImage.Height(), "Images are not the same size.");
-        AssertMsg(patchSize >= 3, "Patch size must be >= 3");
-        AssertMsg(patchStride >= 1, "Patch stride must be >= 1");
+        AssertFmt(approxImage.Width() == referenceImage.Width() && approxImage.Height() == referenceImage.Height(), "Images are not the same size.");
+        AssertFmt(patchSize >= 3, "Patch size must be >= 3");
+        AssertFmt(patchStride >= 1, "Patch stride must be >= 1");
 
         float ssim = 0;
         const float kEpsilon1 = sqr(0.01 * 1e-3f), kEpsilon2 = sqr(0.03 * 1e-3f);
@@ -127,7 +127,7 @@ namespace Flair
     // Compute the multiscale SSIM between two images
     static float ComputeMultiscaleSSIM(const Image1f& approxImage, const Image1f& referenceImage, const int patchSize, const int patchStride)
     {
-        AssertMsg(approxImage.Width() == referenceImage.Width() && approxImage.Height() == referenceImage.Height(), "Images are not the same size.");
+        AssertFmt(approxImage.Width() == referenceImage.Width() && approxImage.Height() == referenceImage.Height(), "Images are not the same size.");
 
         float ssim = ComputeSSIM(approxImage, referenceImage, patchSize, patchStride);
 

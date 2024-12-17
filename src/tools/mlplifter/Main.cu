@@ -72,7 +72,7 @@ namespace Flair
 
 int main(int argc, char* argv[])
 {
-    //try
+    try
     {
         /*IsOk(cudaSetDevice(0));
 
@@ -84,10 +84,10 @@ int main(int argc, char* argv[])
         
         Flair::Run(argc, argv);
     }
-    /*catch (const std::runtime_error& err)
+    catch (const std::runtime_error& err)
     {
         printf("Runtime error: %s\n", err.what());
-    }*/
+    }
 
 
     return 0;

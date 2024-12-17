@@ -14,12 +14,13 @@ namespace Flair
         {
             __shared__ InferenceCtx<Policy> ctx;
             using Model = typename Policy::Model;
+            using Evaluator = typename Policy::Evaluator;
 
             // If the element of the mini-batch overruns the batch size
             if (kBlockIdx >= kernelData.batchSize) { return; }
 
             // Copy MLP data out of global memory into shared memory. 
-            for (int paramIdx = kThreadIdx; paramIdx < Model::kNumParams; ++paramIdx)
+            for (int paramIdx = kThreadIdx; paramIdx < Model::kNumParams; paramIdx += kBlockDim)
             {
                 ctx.mlpData[paramIdx] = kernelData.mlpModelData[paramIdx];
             }
@@ -37,7 +38,7 @@ namespace Flair
                 }
 
                 // Feed forward pass
-                Model::Forward(ctx);
+                Evaluator::Forward(ctx);
 
                 __syncthreads();
                 if (kThreadIdx < Model::kOutputWidth)
@@ -47,13 +48,40 @@ namespace Flair
             }
         }
 
+        template<ComputeDevice targetDevice, typename Policy>
+        struct MLPInferer {};
+
         template<typename Policy>
-        __forceinline__ __host__ void InferBatch(InferenceKernelData<Policy> kernelData)
+        struct MLPInferer<ComputeDevice::kCUDA, Policy>
         {
-            constexpr int kNumThreads = Policy::Model::kMaxConcurrency;
-            AssertFmt(kNumThreads <= 1024, "Exceeded block limit of 1024 threads");
-            InferBatchKernel<kNumThreads> << < Policy::Hyper::kMiniBatchSize, kNumThreads >> > (kernelData);
-            IsOk(cudaGetLastError());
-        }
+            __host__ static void InferBatch(InferenceKernelData<Policy> kernelData)
+            {
+                constexpr int kNumThreads = Policy::Model::kMaxConcurrency;
+                AssertFmt(kNumThreads <= 1024, "Exceeded block limit of 1024 threads");
+                InferBatchKernel<kNumThreads> << < Policy::Hyper::kMiniBatchSize, kNumThreads >> > (kernelData);
+                IsOk(cudaGetLastError());
+            }
+        };
+
+        template<typename Policy>
+        struct MLPInferer<ComputeDevice::kCPU, Policy>
+        {
+            __host__ static void InferBatch(InferenceKernelData<Policy> kernelData)
+            {
+                // Copy MLP weight data into the context
+                TrainingCtx<Policy> ctx;
+                std::memcpy(ctx.mlpData, kernelData.mlpModelData, Policy::Model::kNumParams * sizeof(float));
+
+                for (int sampleIdx = 0; sampleIdx < kernelData.batchSize; ++sampleIdx)
+                {
+                    ctx.state = kernelData.inputSamples[sampleIdx];
+
+                    // Feed forward
+                    Policy::Evaluator::Forward(ctx);
+
+                    kernelData.outputSamples[sampleIdx] = ctx.state; 
+                }
+            }
+        };
     }
 }

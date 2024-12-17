@@ -33,7 +33,7 @@ namespace Flair
             }
         }
 
-        AssertMsg(exrWidth > 0 && exrHeight > 0 && exrDataIn, "tinyexr returned invalid values");
+        AssertFmt(exrWidth > 0 && exrHeight > 0 && exrDataIn, "tinyexr returned invalid values");
 
         image.Resize(exrWidth, exrHeight);
         image.ParallelMap([&](const int x, const int y, const int, float* pixel)

@@ -33,12 +33,6 @@
             asm("trap;"); \
         }
 
-#define CudaAssertMsg(condition, message) \
-        if(!(condition)) {  \
-            printf("Device assert: %s in %s (%d)\n", message, __FILE__, __LINE__); \
-            asm("trap;"); \
-        }
-
 #define CudaAssertFmtImpl(condition, message, ...) \
         if(!(condition)) {  \
             printf(message, __VA_ARGS__); \
@@ -48,7 +42,7 @@
 
 #if defined(_DEBUG)
 #define CudaAssertDebug(condition) CudaAssert(condition)
-#define CudaAssertDebugMsg(condition, message) CudaAssertMsg(condition, message)
+#define CudaAssertDebugMsg(condition, message) CudaAssertFmt(condition, message)
 #define CudaAssertDebugFmt(condition, message, ...) CudaAssertFmt(condition, message, __VA_ARGS__)
 #else
 #define CudaAssertDebug(condition)
@@ -59,16 +53,13 @@
 #else // __CUDA_ARCH__
 
 #define CudaAssert(condition) Assert(condition)
-#define CudaAssertMsg(condition, message) AssertMsg(condition, message)
 #define CudaAssertFmt(condition, message, ...)  AssertFmt(condition, message, __VA_ARGS__)
 
 #if defined(_DEBUG)
 #define CudaAssertDebug(condition) Assert(condition)
-#define CudaAssertDebugMsg(condition, message) AssertMsg(condition, message)
 #define CudaAssertDebugFmt(condition, message, ...) AssertFmt(condition, message, __VA_ARGS__)
 #else
 #define CudaAssertDebug(condition)
-#define CudaAssertDebugMsg(condition, message)
 #define CudaAssertDebugFmt(condition, message, ...)
 #endif
 
@@ -107,3 +98,5 @@ __host__ inline void CudaHostAssert(T result, char const* const func, const char
         }
 
 enum ContainerFlags : int { kCudaMemDevice = 1, kCudaMemMirrored = 2 };
+
+enum class ComputeDevice { kCUDA, kCPU };

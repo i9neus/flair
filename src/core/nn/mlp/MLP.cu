@@ -1,8 +1,10 @@
 #include "MLP.cuh"
 #include "core/utils/HighResTimer.h"
+#include "core/io/IOUtils.h"
 #include "../ContinuousRandomVariable.cuh"
 #include "../Permute.cuh"
 #include "Training.cuh"
+#include "TrainingCPU.cuh"
 #include "Inference.cuh"
 #include "Optimiser.cuh"
 #include <fstream>
@@ -16,31 +18,52 @@ namespace Flair
         // The size of the mini batch
         static constexpr int kMiniBatchSize = 64;
 
+        static constexpr ComputeDevice kComputeDevice = //ComputeDevice::kCUDA;
+                                                        ComputeDevice::kCPU;
 
         using ActivationFunction = Activation::LeakyReLU; 
 
         using LossFunction = Loss::L1;
 
-        using LearningRate = std::ratio<1, 100>;
+        using LearningRate = std::ratio<1, 1000>;
         
-        //using LRDecay = Optimiser::NullDecaySchedule;
-        using LRDecay = Optimiser::ExponentialDecaySchedule<std::ratio<95, 100>>;
+        using LRDecay = NullDecaySchedule;
+        //using LRDecay = Optimiser::ExponentialDecaySchedule<std::ratio<99, 100>>;
 
-        using OptimiserFunction = Optimiser::Adam<LearningRate, LRDecay>;
+        using OptimiserFunction = Adam<LearningRate, LRDecay>;
         //using OptimiserFunction = Optimiser::SGD<LearningRate, LRDecay>;
 
-        using Model = LinearSequential<Linear<35, 35>, Linear<35, 35>, Linear<35, 35>, Linear<35, 35>>;
+        //using Model = LinearSequential<Linear<49, 49>, Linear<49, 45>, Linear<45, 41>, Linear<41, 36>>;
+        using Model = LinearSequential<Linear<36, 36>, Linear<36, 36>, Linear<36, 36>, Linear<36, 36>>;
 
-        using Policy = MLPPolicy<Model, HyperParameters<kMiniBatchSize, ActivationFunction, LossFunction, OptimiserFunction>>;
+        using Evaluator = LinearSequentialEvaluator<kComputeDevice, Model>;
+
+        using Policy = MLPPolicy<kComputeDevice, Model, Evaluator, HyperParameters<kMiniBatchSize, ActivationFunction, LossFunction, OptimiserFunction>>;
         
-        MLP::MLP()
+        MLP::MLP() : 
+            m_computeModelData(Policy::kComputeDevice)
         {
             Initialise();
         }
 
         void MLP::Initialise()
         {
-        }             
+        }
+
+        void MLP::PrintGradients(const Cuda::Vector<float>& computeGradData) const
+        {
+            std::vector<float> gradData;
+            gradData <<= computeGradData;
+            std::printf("%s\n", Model::Format(gradData).c_str());
+
+            // Print optimisers data
+            /*gradData <<= computeOptimiserData;
+            for (auto f : gradData)
+            {
+                std::printf("%.3f ", f);
+            }
+            std::printf("\n");*/
+        }
 
         void MLP::Train(const std::vector<InputSample>& inputSamples, const std::vector<OutputSample>& targetSamples)
         {
@@ -55,23 +78,30 @@ namespace Flair
 
             printf_red("TrainingCtx: %i bytes\n", ctxSize);
 
-            Cuda::Vector<float> deviceGradData(Policy::Hyper::kMiniBatchSize * Policy::Model::kNumParams);
-            Cuda::Vector<InputSample> deviceInputSamples(inputSamples.size());
-            Cuda::Vector<OutputSample> deviceTargetSamples(inputSamples.size());
-            Cuda::Vector<float> deviceSampleLosses(Policy::Hyper::kMiniBatchSize);
-            Cuda::Object<float> deviceMiniBatchLoss;
+            Cuda::Vector<float> computeGradData(Policy::kComputeDevice, Policy::Hyper::kMiniBatchSize * Policy::Model::kNumParams, 0.f);
+            Cuda::Vector<InputSample> computeInputSamples(Policy::kComputeDevice, inputSamples.size());
+            Cuda::Vector<OutputSample> computeOutputSamples(Policy::kComputeDevice, inputSamples.size());
+            Cuda::Vector<OutputSample> computeTargetSamples(Policy::kComputeDevice, inputSamples.size());
+            Cuda::Vector<float> computeSampleLosses(Policy::kComputeDevice, Policy::Hyper::kMiniBatchSize);
+            Cuda::Object<float> computeMiniBatchLoss(Policy::kComputeDevice);
 
             // Determininstically initialise the mini-batch weights and the optimiser 
             std::vector<float> hostModelData(Model::kNumParams);
-            auto rng = NormalRandomDistribution(0, 1.f, std::hash<int>{}(0));
+            //auto rng = NormalRandomDistribution(0, 1.f, std::hash<int>{}(0));
+            auto rng = UniformDistribution(-1, 1, std::hash<int>{}(0));
             //auto rng = Ones();
             Model::Initialise(hostModelData, rng);
-            m_deviceModelData <<= hostModelData;
+            
+            // Load external weights
+            Assert(IO::DeserialiseArray(hostModelData, "C:/projects/probenet/src/experiments/flair/weights.dat") > 0);
+            Assert(hostModelData.size() == Model::kNumParams);
+            Model::Transpose(hostModelData); 
+            //printf_yellow("%s\n\n", Model::Format(hostModelData).c_str());
+
+            m_computeModelData <<= hostModelData;
 
             // Create and initialise the optimiser
-            Cuda::Vector<float> deviceOptimiserData(Policy::Model::kNumParams * 2);
-            deviceOptimiserData.Fill(0);
-            deviceGradData.Fill(0);
+            Cuda::Vector<float> computeOptimiserData(Policy::kComputeDevice, Policy::Model::kNumParams * 2, 0.f);
 
             /*std::vector<InputSample> tempInput(inputSamples.size(), InputSample(0));
             std::vector<OutputSample> tempTarget(targetSamples.size(), OutputSample(0));
@@ -79,71 +109,112 @@ namespace Flair
             for (auto& f : tempTarget) { f = targetSamples.front(); }*/
 
             // Upload the samples
-            deviceInputSamples <<= inputSamples;
-            deviceTargetSamples <<= targetSamples;
+            computeInputSamples <<= inputSamples;
+            computeTargetSamples <<= targetSamples;
+            computeTargetSamples.Resize(targetSamples.size());
 
             // Create random indirection buffer
-            Permutation sampleIdxs(inputSamples.size());
-            sampleIdxs.Randomise();
+            Permutation sampleIdxs(Policy::kComputeDevice, inputSamples.size());
+            //sampleIdxs.Randomise();
+            sampleIdxs.Sequential();
 
             // Initialise the kernel data structure
             TrainingKernelData<Policy> kernelData;
-            kernelData.mlpModelData = m_deviceModelData.GetDeviceData();
-            kernelData.mlpGradData = deviceGradData.GetDeviceData();
-            kernelData.inputSamples = deviceInputSamples.GetDeviceData();
-            kernelData.targetSamples = deviceTargetSamples.GetDeviceData();
-            kernelData.optimiserData = deviceOptimiserData.GetDeviceData();
-            kernelData.sampleIdxs = sampleIdxs.GetDeviceData();
-            kernelData.sampleLosses = deviceSampleLosses.GetDeviceData();
-            kernelData.miniBatchLoss = deviceMiniBatchLoss.GetDeviceData();
+            kernelData.mlpModelData = m_computeModelData.GetComputeData();
+            kernelData.mlpGradData = computeGradData.GetComputeData();
+            kernelData.inputSamples = computeInputSamples.GetComputeData();
+            kernelData.outputSamples = computeOutputSamples.GetComputeData();
+            kernelData.targetSamples = computeTargetSamples.GetComputeData();
+            kernelData.optimiserData = computeOptimiserData.GetComputeData();
+            kernelData.sampleIdxs = sampleIdxs.GetComputeData();
+            kernelData.sampleLosses = computeSampleLosses.GetComputeData();
+            kernelData.miniBatchLoss = computeMiniBatchLoss.GetComputeData();
             kernelData.batchSize = inputSamples.size();
 
-            constexpr int kMaxEpochs = 50;
+            constexpr int kMaxEpochs = 1;
             constexpr int kMaxMiniBatches = std::numeric_limits<int>::max();
             int miniBatchIdx = 0;
             HighResTimer kernelTimer, lossTimer;
             double totalTime = 0;
+            
+            using Trainer = MLPTrainer<Policy::kComputeDevice, Policy>;
 
             std::vector<std::pair<int, float>> epochLoss;
             std::vector<float> miniBatchLoss;
 
             /*printf("Ref:\n");
             (*targetSamples)[0].Print();*/
-
+            
             for (int epochIdx = 0; epochIdx < kMaxEpochs && miniBatchIdx < kMaxMiniBatches; ++epochIdx)
-            {                                                                
-                // Reset the kernel data (loss values, etc.) for the new epoch
-                PrepareNewEpoch(kernelData);
-
+            {                                                               
                 float meanLoss = 0;                
                 for (int sampleIdx = 0; sampleIdx < kernelData.batchSize && miniBatchIdx < kMaxMiniBatches; sampleIdx += Policy::Hyper::kMiniBatchSize, ++miniBatchIdx)
                 {
                     kernelTimer.Reset();
 
+                    computeGradData.Fill(0.f);
+
+                    // Reset the kernel data (loss values, etc.) for the new epoch
+                    Trainer::PrepareNewEpoch(kernelData);
+
                     // Estimate the gradients
-                    EstimateGradients(kernelData, sampleIdx);
+                    Trainer::EstimateGradients(kernelData, sampleIdx);
+
+                    if (false && miniBatchIdx == 1)
+                    {
+                        //printf_red("\n---------------------------------------------------------\nEPOCH %i\n\n", epochIdx);
+
+                        hostModelData <<= m_computeModelData;
+                        printf_yellow("WEIGHTS:\n%s\n\n", Model::Format(hostModelData).c_str());
+
+                    }
 
                     // Optimiser step
-                    if (epochIdx > 0)
+                    //if (epochIdx > 0)
                     {
-                        Descend(kernelData, epochIdx);
+                        Optimiser<Policy::kComputeDevice, Policy>::Descend(kernelData, epochIdx);
                     }
 
                     IsOk(cudaDeviceSynchronize());
                     totalTime += kernelTimer.Get();
 
-                    const float loss = deviceMiniBatchLoss.Download();
-                    miniBatchLoss.emplace_back(loss);
-                    if (miniBatchIdx == 0) { epochLoss.emplace_back(0, loss); }
-                    //printf("%i %f\n", miniBatchIdx, loss);
+                    // State diagnostics
+                    //if (kPrintDebug && (epochIdx == 0 || epochIdx == kMaxEpochs - 1))
+                    if(false)
+                    {
+                        //printf_red("\n---------------------------------------------------------\nEPOCH %i\n\n", epochIdx);
+
+                        std::vector<float> gradData;
+                        gradData <<= computeGradData;
+                        std::printf("GRADIENTS %i: %s\n\n\n", miniBatchIdx, Model::Format(gradData).c_str());
+
+                        std::vector<OutputSample> outputSamples;
+                        outputSamples <<= computeOutputSamples;
+                        printf("INPUT:\n%s\n", inputSamples[59].Format(false, false).c_str());
+                        printf("OUTPUT:\n%s\n", outputSamples[59].Format(false, false).c_str());
+                        printf("TARGET:\n%s\n", targetSamples[59].Format(false, false).c_str());
+
+                        printf_red("\n\n\n");
+                    }
+
+                    std::vector<float> hostSampleLosses;
+                    hostSampleLosses <<= computeSampleLosses;
+                    for (auto& f : hostSampleLosses) { printf("%.10f, ", f); }
+
+                    const float loss = computeMiniBatchLoss.Download();
+                    //miniBatchLoss.emplace_back(loss);
+                    //if (miniBatchIdx == 0) { epochLoss.emplace_back(0, loss); }
+                    printf("Mini batch %i loss: %f\n", miniBatchIdx, loss);
                     meanLoss += loss;
+
+                    break;
                 }
 
                 // Record the loss
                 meanLoss /= std::ceil(kernelData.batchSize / float(Policy::Hyper::kMiniBatchSize));
                 epochLoss.emplace_back(miniBatchIdx, meanLoss);
 
-                if (epochIdx == 0 || lossTimer.Get() > 1. / 3)
+                //if (epochIdx == 0 || epochIdx == kMaxEpochs - 1 || lossTimer.Get() > 1. / 3)
                 { 
                     printf("Epoch %i: L1 = %.10f\n", epochIdx, meanLoss); 
                     lossTimer.Reset();
@@ -151,23 +222,7 @@ namespace Flair
                 IsOk(cudaDeviceSynchronize());
 
                 // Shuffle the indirection indices
-                sampleIdxs.Shuffle();
-                
-                /*if (epochIdx == 0 || epochIdx == kMaxEpochs - 1)
-                {
-                    std::vector<float> gradData;
-                    gradData <<= deviceGradData;
-                    //gradData <<= m_deviceModelData;
-                    std::printf("\n\n\n\n%i\n----------------\n%s\n\n", miniBatchIdx, Model::Format(gradData.data()).c_str());
-
-                    // Print optimisers data
-                    gradData <<= deviceOptimiserData;
-                    for (auto f : gradData)
-                    {
-                        std::printf("%.3f ", f);
-                    }
-                    std::printf("\n");
-                }*/
+                //sampleIdxs.Shuffle();   
 
                 // Print sample indices
                 /*std::vector<int>& idxs = sampleIdxs.GetHostData();
@@ -188,17 +243,34 @@ namespace Flair
             {
                 file << tfm::format("%i %f ", epochLoss[i].first, epochLoss[i].second);
             }
-            file.close();            
+            file.close();    
+
+            /*std::vector<float> gradData;
+            gradData <<= computeGradData;
+            std::printf("GRADIENTS: %s\n", Model::Format(gradData).c_str());
+
+            hostModelData <<= m_computeModelData;
+            printf_yellow("WEIGHTS:\n%s\n\n", Model::Format(hostModelData).c_str());*/
+
+            // Print optimiser data
+            /*std::vector<float> adamData;
+            adamData <<= computeOptimiserData;
+            printf("ADAM:\n");
+            for (auto f : adamData)
+            {
+                std::printf("%.5e ", f);
+            }*/
+            std::printf("\n");
         }
 
         void MLP::Infer(ReadBatchFunctor readBatch, WriteBatchFunctor writeBatch)
         {            
-            Cuda::Vector<InputSample> deviceInputSamples(Policy::Hyper::kMiniBatchSize);
-            Cuda::Vector<OutputSample> deviceOutputSamples(Policy::Hyper::kMiniBatchSize);
+            Cuda::Vector<InputSample> computeInputSamples(kComputeDevice, Policy::Hyper::kMiniBatchSize);
+            Cuda::Vector<OutputSample> computeOutputSamples(kComputeDevice, Policy::Hyper::kMiniBatchSize);
             
             // Initialise the kernel data structure
             InferenceKernelData<Policy> kernelData;
-            kernelData.mlpModelData = m_deviceModelData.GetDeviceData();
+            kernelData.mlpModelData = m_computeModelData.GetComputeData();
 
             HighResTimer timer;
             std::vector<InputSample> hostInputSamples;
@@ -206,16 +278,16 @@ namespace Flair
             int sampleIdx = 0;
             while (readBatch(hostInputSamples, sampleIdx) && !hostInputSamples.empty())
             {
-                deviceOutputSamples.Resize(hostInputSamples.size());
-                deviceInputSamples <<= hostInputSamples; 
+                computeOutputSamples.Resize(hostInputSamples.size());
+                computeInputSamples <<= hostInputSamples; 
 
                 kernelData.batchSize = hostInputSamples.size();
-                kernelData.inputSamples = deviceInputSamples.GetDeviceData();
-                kernelData.outputSamples = deviceOutputSamples.GetDeviceData();
+                kernelData.inputSamples = computeInputSamples.GetComputeData();
+                kernelData.outputSamples = computeOutputSamples.GetComputeData();
 
-                InferBatch(kernelData);
+                MLPInferer<Policy::kComputeDevice, Policy>::InferBatch(kernelData);
 
-                hostOutputSamples <<= deviceOutputSamples;
+                hostOutputSamples <<= computeOutputSamples;
                 writeBatch(hostOutputSamples, sampleIdx);
                 sampleIdx += hostInputSamples.size();
             }

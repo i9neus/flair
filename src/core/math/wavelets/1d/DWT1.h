@@ -138,7 +138,7 @@ namespace Flair
 
 		void ValidateInput(std::vector<Real>& inputData)
 		{
-			AssertMsg(m_blockSize > 0, "DWT1 was not initialised with Prepare().");
+			AssertFmt(m_blockSize > 0, "DWT1 was not initialised with Prepare().");
 			AssertFmt(inputData.size() >= sqr(m_blockSize), "Input data of size %zi is not large enough for block size of %i.", inputData.size(), m_blockSize);
 		}
 	};

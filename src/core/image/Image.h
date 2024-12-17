@@ -107,7 +107,7 @@ namespace Flair
 
         void EmplaceChannel(const Image<Type, 1>& chnlData, const int chnlIdx)
         {
-            AssertMsg(chnlData.Width() == m_width && chnlData.Height() == m_height, "Size mismatch!");
+            AssertFmt(chnlData.Width() == m_width && chnlData.Height() == m_height, "Size mismatch!");
             for (int i = 0; i < m_area; ++i)
             {
                 m_data[i * Channels + chnlIdx] = chnlData[i];

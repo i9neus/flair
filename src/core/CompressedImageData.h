@@ -58,7 +58,7 @@ namespace Flair
 
 		void Serialise(OutputStream& stream)
 		{
-			AssertMsg(header.channels == kChannels, "Serialiser only supports 3 channels");
+			AssertFmt(header.channels == kChannels, "Serialiser only supports 3 channels");
 
 			// Write the file header
 			using ModelType = CompressedChannelData::PrecinctModel::value_type::first_type;
@@ -76,9 +76,9 @@ namespace Flair
 			stream.Seek(0);
 
 			stream >> header;
-			AssertMsg(header.magic == MagicNumbers::kImageHeader, "Corrupt byte stream: magic number mismatch in image data header.");
-			AssertMsg(header.channels == 3, "Only 3 channel images are supported.");
-			AssertMsg(header.coderModelEntrySize == sizeof(CompressedChannelData::PrecinctModel::value_type::first_type), "Unexpected coder model entry size.");
+			AssertFmt(header.magic == MagicNumbers::kImageHeader, "Corrupt byte stream: magic number mismatch in image data header.");
+			AssertFmt(header.channels == 3, "Only 3 channel images are supported.");
+			AssertFmt(header.coderModelEntrySize == sizeof(CompressedChannelData::PrecinctModel::value_type::first_type), "Unexpected coder model entry size.");
 
 			for (int chnlIdx = 0; chnlIdx < kChannels; ++chnlIdx)
 			{

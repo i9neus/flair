@@ -74,8 +74,8 @@ namespace Flair
 		{
 			// Deserialise and check the header
 			stream >> header;
-			AssertMsg(header.magic == MagicNumbers::kChannelHeader, "Corrupt byte stream: mMagic number mismatch in channel data header.");
-			AssertMsg(header.sizeUncompressedPrecinctData > 0, "Corrupt byte stream: header.sizeUncompressedPrecinctData < 0");
+			AssertFmt(header.magic == MagicNumbers::kChannelHeader, "Corrupt byte stream: mMagic number mismatch in channel data header.");
+			AssertFmt(header.sizeUncompressedPrecinctData > 0, "Corrupt byte stream: header.sizeUncompressedPrecinctData < 0");
 			compressedPrecinctData.resize(header.numPrecincts);
 
 			// Deserialise the half-precision uncompressed precinct data and convert it back to full-precision 32-bit floats

@@ -80,7 +80,7 @@ namespace Flair
 		{
 			// Deseriaise the precinct header
 			stream >> header;
-			AssertMsg(header.magic == MagicNumbers::kPrecintHeader, "Corrupt byte stream: magic number mismatch in precinct data header.");
+			AssertFmt(header.magic == MagicNumbers::kPrecintHeader, "Corrupt byte stream: magic number mismatch in precinct data header.");
 
 			// Deserialise the coder
 			arithModel.resize(header.sizePrecinctModelPMFTable);

@@ -1,10 +1,7 @@
 #pragma once
 
-#include "core/utils/cuda/CudaUtils.cuh"
-#include "core/utils/ConsoleUtils.h"
 #include "Tensor1D.cuh"
-#include "thirdparty/tinyformat/tinyformat.h"
-#include "core/math/MathUtils.h"
+#include "ListUtils.cuh"
 
 namespace Flair
 {    
@@ -13,7 +10,7 @@ namespace Flair
     {
         // NOTE: Tensor stored in column-major order        
     private:
-        static constexpr int kMaxThreads = 512;
+        static constexpr int kMaxThreads = 1024;
 
         union
         {
@@ -74,7 +71,8 @@ namespace Flair
         template<typename RNG>
         __host__ void Initialise(RNG& rng)
         {
-            const float norm = std::sqrt(2.0f / (N + M));
+            const float norm = kRoot2 * std::sqrt(2.0f / (N + M));
+            //const float norm = std::sqrt(1.f / N);
             for (int i = 0; i < M * N; ++i) 
             { 
                 rawData[i] = rng() * norm;
@@ -164,9 +162,9 @@ namespace Flair
         __host__ __forceinline__ TensorIterator<float> end() { return TensorIterator<float>(data, N); }
         __host__ __forceinline__ TensorIterator<const float> end() const { return TensorIterator<const float>(data, N); }
 
-        __host__ __device__ Tensor2D Transpose() const
+        __host__ __device__ Tensor2D<M, N> Transpose() const
         {
-            Tensor2D r;
+            Tensor2D<M, N> r;
             for (int n = 0; n < N; ++n)
             {
                 for (int m = 0; m < M; ++m)
@@ -177,32 +175,32 @@ namespace Flair
             return r;
         }
 
-        __host__ __device__ void Print(const bool showGrad = false) const
+        __host__ __device__ void Print(const bool showGrad = false, const bool scientific = true) const
         {
-            CudaAssertMsg(!showGrad || HasGrad, "Tensor does not have gradients to print");
+            CudaAssertFmt(!showGrad || HasGrad, "Tensor does not have gradients to print");
             printf("{\n");
             for (int rowIdx = 0; rowIdx < M; ++rowIdx)
             {
                 printf(" { ");
                 for (int colIdx = 0; colIdx < N; ++colIdx)
                 {       
-                    printf("%s%.8f", colIdx ? ", " : "", data[showGrad ? (N + colIdx) : colIdx][rowIdx]);
+                    printf(scientific ? "%s%.4e" : "%s%.8", colIdx ? ", " : "", data[showGrad ? (N + colIdx) : colIdx][rowIdx]);
                 }
                 printf(" }%s\n", (rowIdx == M - 1) ? "" : ", ");
             }
             printf("}\n");
         }
 
-        __host__ std::string Format(const bool showGrad = false) const
+        __host__ std::string Format(const bool showGrad = false, const bool scientific = true) const
         {
-            CudaAssertMsg(!showGrad || HasGrad, "Tensor does not have gradients to print");
+            CudaAssertFmt(!showGrad || HasGrad, "Tensor does not have gradients to print");
             std::string str = "{\n";
             for (int rowIdx = 0; rowIdx < M; ++rowIdx)
             {
                 str += " { ";
                 for (int colIdx = 0; colIdx < N; ++colIdx)
                 {
-                    str += tfm::format("%s%.8f", colIdx ? ", " : "", data[showGrad ? (N + colIdx) : colIdx][rowIdx]);
+                    str += tfm::format(scientific ? "%s%.4e" : "%s%.8", colIdx ? ", " : "", data[showGrad ? (N + colIdx) : colIdx][rowIdx]);
                 }
                 str += tfm::format(" }%s\n", (rowIdx == M - 1) ? "" : ", ");
             }
