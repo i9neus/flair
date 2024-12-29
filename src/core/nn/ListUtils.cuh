@@ -8,7 +8,7 @@ namespace Flair
 {
     // Sequentially sums the contents of a list using the supplied functor
     template<int N, typename Lambda>
-    __host__ __device__ __inline__ auto SequentialSum(Lambda lambda)
+    __host__ __inline__ auto SequentialSum(Lambda lambda)
     {
         using Type = decltype(lambda(0));
         Type sum = 0;
@@ -23,7 +23,7 @@ namespace Flair
     // Map-reduces the contents of a list using the supplied functor. Potentially avoids loss of precision
     // due to rounding errors as sum grows large
     template<int N, typename Lambda>
-    __host__ __device__ __inline__ auto MapReduceSum(Lambda lambda)
+    __host__ __inline__ auto MapReduceSum(Lambda lambda)
     {
         // Map
         using Type = decltype(lambda(0));

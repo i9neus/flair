@@ -17,7 +17,7 @@ namespace Flair
         class MLP
         {
         public:
-            using InputSample = Tensor1D<36, false>;
+            using InputSample = Tensor1D<49, false>;
             using OutputSample = Tensor1D<36, false>;
             using ReadBatchFunctor = std::function<bool(std::vector<InputSample>&, const int)>;
             using WriteBatchFunctor = std::function<void(const std::vector<OutputSample>&, const int)>;

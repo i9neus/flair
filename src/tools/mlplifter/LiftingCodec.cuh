@@ -11,7 +11,7 @@ namespace Flair
 	class LiftingCodec
 	{
 	public:
-		using InputSample = Tensor1D<36>;
+		using InputSample = Tensor1D<49>;
 		using OutputSample = Tensor1D<36>;
 		using InputSampleList = std::vector<InputSample>;
 		using OutputSampleList = std::vector<OutputSample>;

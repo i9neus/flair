@@ -156,7 +156,7 @@ namespace Flair
 
     // Matrix multiply of an NxM tensor with K-tensor. 
     template<int N, int M, int V, bool HasGrad>
-    __host__ __device__ static Tensor1D<M, HasGrad> Mul(const Tensor2D<N, M, HasGrad>& X, const Tensor1D<V, HasGrad>& v)
+    __host__ static Tensor1D<M, HasGrad> Mul(const Tensor2D<N, M, HasGrad>& X, const Tensor1D<V, HasGrad>& v)
     {
         CudaAssertFmt(V >= N, "Vector dimension must be at least as large as tensor dimensions %i x %i", N, M);
 
@@ -170,7 +170,7 @@ namespace Flair
 
     // Matrix multiply of the transpose of an NxM tensor with K-tensor. 
     template<int N, int M, int V, bool HasGrad>
-    __host__ __device__ static Tensor1D<N, HasGrad> MulT(const Tensor2D<N, M, HasGrad>& X, const Tensor1D<V, HasGrad>& v)
+    __host__ static Tensor1D<N, HasGrad> MulT(const Tensor2D<N, M, HasGrad>& X, const Tensor1D<V, HasGrad>& v)
     {
         // Block must have have at least as many threads as the tensor has elements
         static_assert(V >= M, "Vector dimensions must be at least as large as tensor dimensions");

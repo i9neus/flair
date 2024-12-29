@@ -18,14 +18,14 @@ namespace Flair
         // The size of the mini batch
         static constexpr int kMiniBatchSize = 64;
 
-        static constexpr ComputeDevice kComputeDevice = //ComputeDevice::kCUDA;
-                                                        ComputeDevice::kCPU;
+        static constexpr ComputeDevice kComputeDevice = ComputeDevice::kCUDA;
+                                                        //ComputeDevice::kCPU;
 
         using ActivationFunction = Activation::LeakyReLU; 
 
         using LossFunction = Loss::L1;
 
-        using LearningRate = std::ratio<1, 1000>;
+        using LearningRate = std::ratio<1, 100>;
         
         using LRDecay = NullDecaySchedule;
         //using LRDecay = Optimiser::ExponentialDecaySchedule<std::ratio<99, 100>>;
@@ -33,8 +33,8 @@ namespace Flair
         using OptimiserFunction = Adam<LearningRate, LRDecay>;
         //using OptimiserFunction = Optimiser::SGD<LearningRate, LRDecay>;
 
-        //using Model = LinearSequential<Linear<49, 49>, Linear<49, 45>, Linear<45, 41>, Linear<41, 36>>;
-        using Model = LinearSequential<Linear<36, 36>, Linear<36, 36>, Linear<36, 36>, Linear<36, 36>>;
+        using Model = LinearSequential<Linear<49, 49>, Linear<49, 45>, Linear<45, 41>, Linear<41, 36>>;
+        //using Model = LinearSequential<Linear<49, 36>>;
 
         using Evaluator = LinearSequentialEvaluator<kComputeDevice, Model>;
 
@@ -93,9 +93,9 @@ namespace Flair
             Model::Initialise(hostModelData, rng);
             
             // Load external weights
-            Assert(IO::DeserialiseArray(hostModelData, "C:/projects/probenet/src/experiments/flair/weights.dat") > 0);
+            /*Assert(IO::DeserialiseArray(hostModelData, "C:/projects/probenet/src/experiments/flair/weights.dat") > 0);
             Assert(hostModelData.size() == Model::kNumParams);
-            Model::Transpose(hostModelData); 
+            Model::Transpose(hostModelData); */
             //printf_yellow("%s\n\n", Model::Format(hostModelData).c_str());
 
             m_computeModelData <<= hostModelData;
@@ -115,8 +115,8 @@ namespace Flair
 
             // Create random indirection buffer
             Permutation sampleIdxs(Policy::kComputeDevice, inputSamples.size());
-            //sampleIdxs.Randomise();
-            sampleIdxs.Sequential();
+            sampleIdxs.Randomise();
+            //sampleIdxs.Sequential();
 
             // Initialise the kernel data structure
             TrainingKernelData<Policy> kernelData;
@@ -131,7 +131,7 @@ namespace Flair
             kernelData.miniBatchLoss = computeMiniBatchLoss.GetComputeData();
             kernelData.batchSize = inputSamples.size();
 
-            constexpr int kMaxEpochs = 1;
+            constexpr int kMaxEpochs = 50;
             constexpr int kMaxMiniBatches = std::numeric_limits<int>::max();
             int miniBatchIdx = 0;
             HighResTimer kernelTimer, lossTimer;
@@ -170,10 +170,7 @@ namespace Flair
                     }
 
                     // Optimiser step
-                    //if (epochIdx > 0)
-                    {
-                        Optimiser<Policy::kComputeDevice, Policy>::Descend(kernelData, epochIdx);
-                    }
+                    Optimiser<Policy::kComputeDevice, Policy>::Descend(kernelData, epochIdx);
 
                     IsOk(cudaDeviceSynchronize());
                     totalTime += kernelTimer.Get();
@@ -190,31 +187,32 @@ namespace Flair
 
                         std::vector<OutputSample> outputSamples;
                         outputSamples <<= computeOutputSamples;
-                        printf("INPUT:\n%s\n", inputSamples[59].Format(false, false).c_str());
-                        printf("OUTPUT:\n%s\n", outputSamples[59].Format(false, false).c_str());
-                        printf("TARGET:\n%s\n", targetSamples[59].Format(false, false).c_str());
+                        printf("INPUT:\n%s\n", inputSamples[0].Format(false, false).c_str());
+                        printf("OUTPUT:\n%s\n", outputSamples[0].Format(false, false).c_str());
+                        printf("TARGET:\n%s\n", targetSamples[0].Format(false, false).c_str());
 
                         printf_red("\n\n\n");
                     }
 
-                    std::vector<float> hostSampleLosses;
+                    // Print sample losses for mini-batch
+                    /*std::vector<float> hostSampleLosses;
                     hostSampleLosses <<= computeSampleLosses;
-                    for (auto& f : hostSampleLosses) { printf("%.10f, ", f); }
+                    for (auto& f : hostSampleLosses) { printf("%.10f, ", f); }*/
 
                     const float loss = computeMiniBatchLoss.Download();
                     //miniBatchLoss.emplace_back(loss);
                     //if (miniBatchIdx == 0) { epochLoss.emplace_back(0, loss); }
-                    printf("Mini batch %i loss: %f\n", miniBatchIdx, loss);
+                    //printf("   Mini batch %i: %.15f\n", miniBatchIdx, loss);
                     meanLoss += loss;
 
-                    break;
+                    //break;
                 }
 
                 // Record the loss
                 meanLoss /= std::ceil(kernelData.batchSize / float(Policy::Hyper::kMiniBatchSize));
                 epochLoss.emplace_back(miniBatchIdx, meanLoss);
 
-                //if (epochIdx == 0 || epochIdx == kMaxEpochs - 1 || lossTimer.Get() > 1. / 3)
+                if (epochIdx == 0 || epochIdx == kMaxEpochs - 1 || lossTimer.Get() > 1. / 3)
                 { 
                     printf("Epoch %i: L1 = %.10f\n", epochIdx, meanLoss); 
                     lossTimer.Reset();
@@ -222,7 +220,7 @@ namespace Flair
                 IsOk(cudaDeviceSynchronize());
 
                 // Shuffle the indirection indices
-                //sampleIdxs.Shuffle();   
+                sampleIdxs.Shuffle();   
 
                 // Print sample indices
                 /*std::vector<int>& idxs = sampleIdxs.GetHostData();
@@ -258,9 +256,9 @@ namespace Flair
             printf("ADAM:\n");
             for (auto f : adamData)
             {
-                std::printf("%.5e ", f);
-            }*/
-            std::printf("\n");
+                std::printf("%.10e ", f);
+            }
+            std::printf("\n");*/
         }
 
         void MLP::Infer(ReadBatchFunctor readBatch, WriteBatchFunctor writeBatch)

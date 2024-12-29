@@ -80,8 +80,7 @@ namespace Flair
         template<typename Type>
         __host__ inline Type& operator<<=(Type& lhs, Object<Type>& rhs)
         {
-            rhs.Download();
-            lhs = *rhs;
+            lhs = rhs.Download();
             return lhs;
         }
     }   

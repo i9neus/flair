@@ -4,28 +4,28 @@
 
 namespace Flair
 {
+    enum TensorDigitFormat : int { kTensorLiteral, kTensorScientific, kTensorMathematica };
+    
     template<int N, bool HasGrad = false>
     struct Tensor1D
     {
-    private:
-        template<int N, bool HasGrad> struct SizeType { enum : int { Value = N*2 }; };
-        template<int N> struct SizeType<N, false> { enum : int { Value = N }; };
-
-        float data[SizeType<N, HasGrad>::Value];
-
-
     public:
-        enum : int 
-        { 
-            kN = N, 
-            kSize = SizeType<N, HasGrad>::Value ,
+        enum : int
+        {
+            kN = N,
+            kSize = N,
 
 #if defined(_DEBUG)
             kIsGuarded = 1
 #else
             kIsGuarded = 0
 #endif
-        };
+    };
+
+    private:
+        float data[N * (HasGrad ? 2 : 1)];
+
+    public:  
 
         __host__ __device__ Tensor1D()
         {
@@ -90,7 +90,7 @@ namespace Flair
         template<int OtherN, bool OtherHasGrad>
         __forceinline__ __host__ __device__ Tensor1D& operator=(const Tensor1D<OtherN, OtherHasGrad>& rhs)
         {
-            for (int i = 0; i < N && i < otherN; ++i) { data[i] = rhs[i]; }
+            for (int i = 0; i < N && i < OtherN; ++i) { data[i] = rhs[i]; }
             return *this;
         }
 
@@ -175,13 +175,13 @@ namespace Flair
 
 #undef CwiseScalarBinaryOp
 
-        __host__ __device__ void Print(const bool showGrad = false, const bool scientific = true) const
+        __host__ __device__ void Print(const bool showGrad = false, const int scientific = true) const
         {
             CudaAssertFmt(!showGrad || HasGrad, "Tensor does not have gradients to print");
             printf("{ ");
             for (int rowIdx = 0; rowIdx < N; ++rowIdx)
             {
-                printf(scientific ? "%s%.4e" : "%s%.8", rowIdx ? ", " : "", data[showGrad ? (N + rowIdx) : rowIdx]);
+                printf(scientific ? "%s%.4E" : "%s%.8", rowIdx ? ", " : "", data[showGrad ? (N + rowIdx) : rowIdx]);
             }
             printf(" }\n");
         }
@@ -192,7 +192,7 @@ namespace Flair
             std::string str = "{ ";
             for (int rowIdx = 0; rowIdx < N; ++rowIdx)
             {
-                str += tfm::format(scientific ? "%s%.4e" : "%s%.8", rowIdx ? ", " : "", data[showGrad ? (N + rowIdx) : rowIdx]);
+                str += tfm::format(scientific ? "%s%.4E" : "%s%.8", rowIdx ? ", " : "", data[showGrad ? (N + rowIdx) : rowIdx]);
 
             }
             str += " }";

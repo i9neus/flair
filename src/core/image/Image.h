@@ -39,12 +39,9 @@ namespace Flair
         using ParallelMapFunctor = std::function<void(int, int, int, Type*)>;
 
     public:
-        Image() : Image(0, 0) {}
+        Image() : m_width(0), m_height(0), m_area(0) {}
 
-        Image(const int width, const int height, const Type* data = nullptr) :
-            m_width(0),
-            m_height(0),
-            m_area(0)
+        Image(const int width, const int height, const Type* data = nullptr) : Image()
         {
             Resize(width, height);
             if (data)
@@ -53,17 +50,21 @@ namespace Flair
             }
         }
 
-        Image(const Image& other)
-        {
-            *this = other;
-        }
+        ~Image() = default;
+        Image(const Image& other) { *this = other; }
+        Image(Image&& other) { *this = std::move(other); }
 
         Image& operator=(const Image& other)
         {
             m_data = other.m_data;
-            m_width = other.m_width;
-            m_height = other.m_height;
-            m_area = other.m_area;
+            CopyAttribs(other);
+            return *this;
+        }
+
+        Image& operator=(Image&& other)
+        {
+            m_data = std::move(other.m_data);
+            CopyAttribs(other);
             return *this;
         }
 
@@ -319,6 +320,13 @@ namespace Flair
                 const int y = region.y0 + i / region.Width();
                 setPixel(x, y, threadIdx, &m_data[Channels * (y * m_width + x)]);
             }
+        }
+
+        void CopyAttribs(const Image& other)
+        {
+            m_width = other.m_width;
+            m_height = other.m_height;
+            m_area = other.m_area;
         }
 
     private:

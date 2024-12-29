@@ -33,7 +33,7 @@ namespace Flair
 
             __host__ std::string Format() const
             {
-                return w.Format() + "\n" + b.Format() + "\n";
+                return w.Format(false, false) + "\n" + b.Format(false, false) + "\n";
             }
 
             __inline__ __host__ __device__ void ZeroGrad()
@@ -143,8 +143,7 @@ namespace Flair
             {
                 __inline__ __host__ static void F(float* data)
                 {
-                    auto& w = reinterpret_cast<Layer*>(data)->w;
-                    w = w.Transpose();
+                    reinterpret_cast<Layer*>(data)->w.FromRowMajor();
                     TransposeRecursor<Next...>::F(data + sizeof(Layer) / sizeof(float));
                 }
             };

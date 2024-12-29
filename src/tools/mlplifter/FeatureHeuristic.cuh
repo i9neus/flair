@@ -11,11 +11,11 @@ namespace Flair
     public:
         FeatureHeuristic() = delete;
 
-        static void Classify(const Image1f& inputImage, const ImageRect& region, Image1f& varImage, float& maxVal)
+        static void Classify(const Image1f& inputImage, const ImageRect& region, Image1f& heuristicImage, float& maxVal, const int dilateRadius)
         {
-            varImage.Resize(inputImage);
+            heuristicImage.Resize(inputImage);
 
-            const int numThreads = varImage.GetThreadCount();
+            const int numThreads = heuristicImage.GetThreadCount();
             std::vector<float> maxVarMap(numThreads, 0.0f);
 
             // Map and reduce the variance
@@ -25,7 +25,32 @@ namespace Flair
 
                 maxVarMap[threadIdx] = std::max(*pixel, maxVarMap[threadIdx]);
             };
-            varImage.ParallelMap(calcVarFunctor, region);
+            heuristicImage.ParallelMap(calcVarFunctor, region);
+
+            // Dilate the heuristic map 
+            if (dilateRadius > 0)
+            {
+                Image1f::ParallelMapFunctor dilateFunctor = [&](const int x, const int y, const int threadIdx, float* pixel)
+                {
+                    float dilated = 0;
+                    for (int v = -dilateRadius; v <= dilateRadius; ++v)
+                    {
+                        for (int u = -dilateRadius; u <= dilateRadius; ++u)
+                        {
+                            if (heuristicImage.Contains(x + u, y + v))
+                            {
+                                dilated = std::max(dilated, heuristicImage.At(x + u, y + v)[0]);
+                            }
+                        }
+                        *pixel = dilated;
+                    }
+                };
+
+                Image1f swapImage(inputImage.Width(), inputImage.Height());
+                swapImage.ParallelMap(dilateFunctor, region);
+                heuristicImage = std::move(swapImage);
+            }
+
             maxVal = std::reduce(maxVarMap.begin(), maxVarMap.end(), 0.0f, [](float a, float b) -> float { return std::max(a, b); });
         }
     };
@@ -57,7 +82,7 @@ namespace Flair
                 }
             }
             float var = m2 / kKernelArea - sqr(m / kKernelArea); // Variance
-            var = std::pow(var, 0.6f); // Mix
+            //var = std::pow(var, 0.6f); // Mix
             //var = std::sqrt(var); // Standard deviation
 
             return var;

@@ -13,7 +13,6 @@ namespace Flair
         private:
             __host__ static float EstimateLoss(TrainingCtx<Policy>& ctx)
             {
-                float sumLoss = 0;
                 for (int m = 0; m < Policy::Model::kOutputWidth; ++m)
                 {
                     ctx.error[m] = Policy::Hyper::Loss::dF(ctx.state[m], ctx.target[m]) / Policy::Model::kOutputWidth;

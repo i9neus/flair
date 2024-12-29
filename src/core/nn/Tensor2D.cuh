@@ -8,26 +8,18 @@ namespace Flair
     template<int N, int M, bool HasGrad = false>
     struct Tensor2D
     {
-        // NOTE: Tensor stored in column-major order        
-    private:
-        static constexpr int kMaxThreads = 1024;
-
-        union
-        {
-            float data[N * (HasGrad ? 2 : 1)][M];
-            float rawData[N * (HasGrad ? 2 : 1) * M];
-        };  
+        static constexpr int kMaxCUDAThreads = 1024;
 
     public:
-
         enum : int
         {
             kN = N,
             kM = M,
+            kSize = N * M,
 
             // The number of columns/ros per thread
-            kNPerThread = DivCeil(N, kMaxThreads / M),
-            kMPerThread = DivCeil(M, kMaxThreads / N),
+            kNPerThread = DivCeil(N, kMaxCUDAThreads / M),
+            kMPerThread = DivCeil(M, kMaxCUDAThreads / N),
 
             // Number of threads per row/column
             kConcurrentN = DivCeil(N, kNPerThread),
@@ -45,7 +37,15 @@ namespace Flair
 #else
             kIsGuarded = 0
 #endif
-        };        
+        };
+
+        // NOTE: Tensor stored in column-major order        
+    private:
+        union
+        {
+            float data[N * (HasGrad ? 2 : 1)][M];
+            float rawData[N * M * (HasGrad ? 2 : 1)];
+        };      
 
     public:
         __host__ __device__ Tensor2D()
@@ -164,6 +164,7 @@ namespace Flair
 
         __host__ __device__ Tensor2D<M, N> Transpose() const
         {
+            // Transposes the tensor from size N x M to size M x N
             Tensor2D<M, N> r;
             for (int n = 0; n < N; ++n)
             {
@@ -175,6 +176,17 @@ namespace Flair
             return r;
         }
 
+        __host__ __device__ void FromRowMajor()
+        {
+            // Assumes the data are stored in row-major order and need to be converted to column-major
+            Tensor2D scratch;
+            for (int i = 0; i < kSize; ++i)
+            {
+                scratch(i % N, i / N) = rawData[i];
+            }
+            *this = scratch;
+        }
+
         __host__ __device__ void Print(const bool showGrad = false, const bool scientific = true) const
         {
             CudaAssertFmt(!showGrad || HasGrad, "Tensor does not have gradients to print");
@@ -184,7 +196,7 @@ namespace Flair
                 printf(" { ");
                 for (int colIdx = 0; colIdx < N; ++colIdx)
                 {       
-                    printf(scientific ? "%s%.4e" : "%s%.8", colIdx ? ", " : "", data[showGrad ? (N + colIdx) : colIdx][rowIdx]);
+                    printf(scientific ? "%s%.4E" : "%s%.8", colIdx ? ", " : "", data[showGrad ? (N + colIdx) : colIdx][rowIdx]);
                 }
                 printf(" }%s\n", (rowIdx == M - 1) ? "" : ", ");
             }
@@ -200,7 +212,7 @@ namespace Flair
                 str += " { ";
                 for (int colIdx = 0; colIdx < N; ++colIdx)
                 {
-                    str += tfm::format(scientific ? "%s%.4e" : "%s%.8", colIdx ? ", " : "", data[showGrad ? (N + colIdx) : colIdx][rowIdx]);
+                    str += tfm::format(scientific ? "%s%.4E" : "%s%.8", colIdx ? ", " : "", data[showGrad ? (N + colIdx) : colIdx][rowIdx]);
                 }
                 str += tfm::format(" }%s\n", (rowIdx == M - 1) ? "" : ", ");
             }

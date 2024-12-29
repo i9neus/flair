@@ -72,7 +72,8 @@ namespace Flair
     {
         //return (value - mean) / mean;
         //return value - mean;
-        return 2. * value - 1.0;
+        return 2 * value / mean - 1;
+        //return 2. * value - 1.0;
         //return value;
     }
 
@@ -80,7 +81,8 @@ namespace Flair
     {
         //return value * mean + mean;
         //return value + mean;
-        return (value + 1.0) / 2.0;
+        return mean * 0.5 * (value + 1);
+        //return (value + 1.0) / 2.0;
         //return value;
     }
 
@@ -91,9 +93,9 @@ namespace Flair
         auto it = sample.begin();   
 
         // First 5x5 samples contain pixel values
-        for (int j = -2; j < 4; ++j)
+        for (int j = -3; j <= 3; ++j)
         {
-            for (int i = -2; i < 4; ++i, ++it)
+            for (int i = -3; i <= 3; ++i, ++it)
             {
                 const float f = m_mipMap[1].Sample(x + i, y + j);
                 //const float f = float(std::sqrt(float(i * i) + float(j * j)) <= 2);
@@ -104,8 +106,8 @@ namespace Flair
         
         // Normalise the samples
         it = sample.begin();
-        mean = std::max(1e-3f, mean / 36);
-        for (int i = 0; i < 36; ++i, ++it)
+        mean = std::max(1e-3f, mean / InputSample::kN);
+        for (int i = 0; i < InputSample::kN; ++i, ++it)
         {
             *it = MapForward(*it, mean);
         }      
@@ -115,9 +117,9 @@ namespace Flair
 
     __host__ LiftingCodec::OutputSample LiftingCodec::GenerateTargetSample(const int x, const int y, const std::tuple<InputSample, float>& inputSample) const
     {
+        OutputSample sample;
         const float mean = std::get<1>(inputSample);
 
-        OutputSample sample;
         auto it = sample.begin();
         for (int j = -2; j < 4; ++j)
         {
@@ -142,7 +144,7 @@ namespace Flair
         using Heuristic = VarianceHeuristic<7>;
 
         float maxFeatureVal;
-        Heuristic::Classify(m_mipMap[1], ImageRect(0, 0, m_mipMap[1].Width(), m_mipMap[1].Height()), m_heuristicImage, maxFeatureVal);
+        Heuristic::Classify(m_mipMap[1], ImageRect(0, 0, m_mipMap[1].Width(), m_mipMap[1].Height()), m_heuristicImage, maxFeatureVal, 3);
 
         // Create empty histograms
         constexpr int kPDFSize = 100;
@@ -191,7 +193,7 @@ namespace Flair
         };
 
         //const int kNumSamples = sqr(m_mipMap[1].Width());
-        constexpr int kNumSamples = 1024;
+        constexpr int kNumSamples = 100000;
 
         Threaded<ThreadCtx> runner(std::min(16, kNumSamples));
         runner.Initialise([&](ThreadCtx& ctx, int i, int N)
@@ -364,10 +366,10 @@ namespace Flair
     { 
         constexpr bool kTrainMLP = true;
         constexpr bool kShowPytorchRef = false;
-        constexpr bool kInferImageCoeffs = false;
-        constexpr bool kCollaborative = false;
-        constexpr bool kTestInference = true;
-        constexpr bool kSignedColourView = true;
+        constexpr bool kInferImageCoeffs = true;
+        constexpr bool kCollaborative = true;
+        constexpr bool kTestInference = false;
+        constexpr bool kSignedColourView = false;
         
         RunTensorTests(false);
         //return inputImage;
@@ -402,13 +404,14 @@ namespace Flair
         InputSampleList inputSamples;
         OutputSampleList targetSamples, outputSamples;
         std::vector<float> inputMeans;
-        //GenerateTrainingSet(8783652, inputSamples, inputMeans, targetSamples);
+
+        GenerateTrainingSet(8783652, inputSamples, inputMeans, targetSamples);
+        SerialiseTrainingSet(inputSamples, targetSamples);
+
+        //DeserialiseTrainingSet(inputSamples, targetSamples);
 
         //inputSamples.resize(1);
         //targetSamples.resize(1);
-
-        //SerialiseTrainingSet(inputSamples, targetSamples);
-        DeserialiseTrainingSet(inputSamples, targetSamples);
 
         //for (auto& f : inputSamples) { f = 1; }
         //for (auto& f : targetSamples) { f = 0.5f; }

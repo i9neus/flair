@@ -43,10 +43,10 @@ namespace Flair
             Reduces accumulated gradients and loss values over the mini batch and stores them in the 0th layer
         **/
         template<typename Policy>
-        __global__ void EstimateGradientsKernel(TrainingKernelData<Policy> kernelData, const int miniBatchOffset, TrainingCtx<Policy>* ctxData)
+        __global__ void EstimateGradientsKernel(TrainingKernelData<Policy> kernelData, const int miniBatchOffset)//, TrainingCtx<Policy>* ctxData)
         {
-            //__shared__ TrainingCtx<Policy> ctx;
-            TrainingCtx<Policy>& ctx = ctxData[kBlockIdx];
+            __shared__ TrainingCtx<Policy> ctx;
+            //TrainingCtx<Policy>& ctx = ctxData[kBlockIdx];
 
             using Model = typename Policy::Model;
             using Evaluator = typename Policy::Evaluator;
@@ -149,14 +149,12 @@ namespace Flair
         {
             __host__ static void EstimateGradients(TrainingKernelData<Policy> kernelData, const int miniBatchOffset)
             {
-                Cuda::Vector<TrainingCtx<Policy>> ctx(ComputeDevice::kCUDA, Policy::Hyper::kMiniBatchSize);
+                //Cuda::Vector<TrainingCtx<Policy>> ctx(ComputeDevice::kCUDA, Policy::Hyper::kMiniBatchSize);
                 
                 // Estimate the gradients for each element in the mini-batch
                 AssertFmt(Policy::Model::kMaxConcurrency <= 1024, "Exceeded block limit of 1024 threads");
-                EstimateGradientsKernel << < Policy::Hyper::kMiniBatchSize, Policy::Model::kMaxConcurrency >> > (kernelData, miniBatchOffset, ctx.GetComputeData());
+                EstimateGradientsKernel << < Policy::Hyper::kMiniBatchSize, Policy::Model::kMaxConcurrency >> > (kernelData, miniBatchOffset);// , ctx.GetComputeData());
                 IsOk(cudaGetLastError());
-
-                return;
 
                 // Reduce the gradients
                 constexpr int kMiniBatchSize = Policy::Hyper::kMiniBatchSize;
