@@ -13,6 +13,7 @@
 #define kThreadIdx              threadIdx.x
 #define kBlockIdx               blockIdx.x
 #define kBlockDim               blockDim.x
+#define kKernelDim              (blockDim.x * gridDim.x)
 #define kWarpLane				(threadIdx.x & 31)
 
 //template<typename T> __device__ __forceinline__ T kKernelPos() { return T(typename T::kType(kKernelX), typename T::kType(kKernelY)); }

@@ -86,24 +86,65 @@ namespace Flair
             }
         }
 
+        template<typename Policy>
+        __global__ void ReduceDescendKernel(TrainingKernelData<Policy> kernelData, const int epochIdx, const int miniBatchSize)
+        {
+            const int kernelIdx = kKernelIdx;
+            const int kParamsPerSlice = kKernelDim / Policy::Hyper::kMiniBatchSize;
+            const int kNumSlices = (Policy::Model::kNumParams + kParamsPerSlice - 1) / kParamsPerSlice;
+            const int kSubSampleIdx = kernelIdx % Policy::Hyper::kMiniBatchSize;
+            __shared__ float scratch[256];       
+
+            // Reduce the gradients and descend
+            __syncthreads();
+            for(int sliceIdx = 0; sliceIdx < kNumSlices; ++sliceIdx)
+            {
+                const int paramIdx = kParamsPerSlice * sliceIdx + kernelIdx / Policy::Hyper::kMiniBatchSize;
+
+                scratch[kThreadIdx] = kernelData.mlpGradData[kSubSampleIdx * Policy::Model::kNumParams + paramIdx];
+
+                for (int stride = 2; stride <= Policy::Hyper::kMiniBatchSize; stride <<= 1)
+                {
+                    __syncthreads();
+                    if (paramIdx < Policy::Model::kNumParams && 
+                        (kThreadIdx & (stride - 1)) == 0 &&
+                        kSubSampleIdx + (stride >> 1) < miniBatchSize)
+                    {
+                        scratch[kThreadIdx] += scratch[(kThreadIdx + (stride >> 1))];
+
+                        if ((kThreadIdx & (Policy::Hyper::kMiniBatchSize - 1)) == 0)
+                        {
+                            scratch[kThreadIdx] /= miniBatchSize;
+                            Policy::Hyper::Optimiser::Step(kernelData.mlpModelData[paramIdx], scratch[kThreadIdx], paramIdx, epochIdx, kernelData.optimiserData);
+                        }
+                    }
+                }                          
+            }
+        }
+
         template<ComputeDevice targetDevice, typename Policy>
         struct Optimiser {};
 
         template<typename Policy>
         struct Optimiser<ComputeDevice::kCUDA, Policy>
         {
-            __host__ static void Descend(TrainingKernelData<Policy> kernelData, const int epochIdx)
-            {
+            __host__ static void Descend(TrainingKernelData<Policy> kernelData, const int epochIdx, const int miniBatchOffset)
+            {              
+                static_assert((Policy::Hyper::kMiniBatchSize & (Policy::Hyper::kMiniBatchSize - 1)) == 0, "Mini-batch size must be a power of 2");
+
+                const int kMiniBatchSize = std::min(int(Policy::Hyper::kMiniBatchSize), kernelData.batchSize - miniBatchOffset);
                 constexpr int kNumThreads = 256;
-                constexpr int kNumBlocks = (Policy::Model::kNumParams + (kNumThreads - 1)) / kNumThreads;
-                DescendKernel << < kNumBlocks, kNumThreads >> > (kernelData, epochIdx);
+                constexpr int kNumBlocks = (Policy::Hyper::kMiniBatchSize * Policy::Model::kNumParams + (kNumThreads - 1)) / kNumThreads;
+
+                ReduceDescendKernel << < kNumBlocks, kNumThreads >> > (kernelData, epochIdx, kMiniBatchSize);
+                //DescendKernel << < kNumBlocks, kNumThreads >> > (kernelData, epochIdx);
             }
         };
 
         template<typename Policy>
         struct Optimiser<ComputeDevice::kCPU, Policy>
         {
-            __host__ static void Descend(TrainingKernelData<Policy> kernelData, const int epochIdx)
+            __host__ static void Descend(TrainingKernelData<Policy> kernelData, const int epochIdx, const int miniBatchOffset)
             {
                 for (int paramIdx = 0; paramIdx < Policy::Model::kNumParams; ++paramIdx)
                 {

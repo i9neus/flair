@@ -16,7 +16,7 @@ namespace Flair
     namespace NN
     {
         // The size of the mini batch
-        static constexpr int kMiniBatchSize = 64;
+        static constexpr int kMiniBatchSize = 128;
 
         static constexpr ComputeDevice kComputeDevice = ComputeDevice::kCUDA;
                                                         //ComputeDevice::kCPU;
@@ -25,7 +25,7 @@ namespace Flair
 
         using LossFunction = Loss::L1;
 
-        using LearningRate = std::ratio<1, 100>;
+        using LearningRate = std::ratio<1, 1000>;
         
         using LRDecay = NullDecaySchedule;
         //using LRDecay = Optimiser::ExponentialDecaySchedule<std::ratio<99, 100>>;
@@ -157,7 +157,7 @@ namespace Flair
                     }
 
                     // Optimiser step
-                    Optimiser<Policy::kComputeDevice, Policy>::Descend(kernelData, epochIdx);
+                    Optimiser<Policy::kComputeDevice, Policy>::Descend(kernelData, epochIdx, sampleIdx);
 
                     IsOk(cudaDeviceSynchronize());
                     totalTime += kernelTimer.Get();
@@ -187,7 +187,7 @@ namespace Flair
                     for (auto& f : hostSampleLosses) { printf("%.10f, ", f); }*/
 
                     const float loss = computeMiniBatchLoss.Download();
-                    //miniBatchLoss.emplace_back(loss);
+                    miniBatchLoss.emplace_back(loss);
                     //if (miniBatchIdx == 0) { epochLoss.emplace_back(0, loss); }
                     //printf("   Mini batch %i: %.15f\n", miniBatchIdx, loss);
                     meanLoss += loss;

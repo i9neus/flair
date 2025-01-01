@@ -96,7 +96,7 @@ namespace Flair
             {
                 kernelData.mlpGradData[kBlockIdx * Model::kNumParams + paramIdx] = ctx.mlpData[paramIdx];
             }
-            if (kThreadIdx == 0) { kernelData.sampleLosses[kBlockIdx] = ctx.loss; }           
+            if (kThreadIdx == 0) { kernelData.sampleLosses[kBlockIdx] = ctx.loss; }    
         }
 
         /**
@@ -135,6 +135,28 @@ namespace Flair
             }
         }
 
+        /**
+            Reduces accumulated gradients and loss values over the mini batch and stores them in the 0th layer
+        **/
+        template<typename Policy>
+        __global__ void ReduceLossKernel(TrainingKernelData<Policy> kernelData)
+        {
+            __shared__ float scratch[Policy::Hyper::kMiniBatchSize];
+
+            // Reduce the loss accross the batch
+            scratch[kThreadIdx] = kernelData.sampleLosses[kThreadIdx];
+            for (int stride = 2; stride <= Policy::Hyper::kMiniBatchSize; stride <<= 1)
+            {
+                __syncthreads();
+                if (kThreadIdx + (stride >> 1) < kBlockDim && (kThreadIdx & (stride - 1)) == 0)
+                {
+                    scratch[kThreadIdx] += scratch[kThreadIdx + (stride >> 1)];
+                }
+            }
+            __syncthreads();
+            if (kKernelIdx == 0) { *kernelData.miniBatchLoss = scratch[0] / kBlockDim; }
+        }
+
         template<typename Policy>
         __global__ void PrepareNewEpochKernel(TrainingKernelData<Policy> kernelData)
         {
@@ -155,10 +177,13 @@ namespace Flair
                 // Estimate the gradients for each element in the mini-batch
                 AssertFmt(Policy::Model::kMaxConcurrency <= 1024, "Exceeded block limit of 1024 threads");
                 EstimateGradientsKernel << < Policy::Hyper::kMiniBatchSize, Policy::Model::kMaxConcurrency >> > (kernelData, miniBatchOffset);// , ctx.GetComputeData());
-                IsOk(cudaGetLastError());
+                //IsOk(cudaGetLastError());
+
+                const int kMiniBatchSize = std::min(int(Policy::Hyper::kMiniBatchSize), kernelData.batchSize - miniBatchOffset);
+                ReduceLossKernel << < 1, kMiniBatchSize >> > (kernelData);
 
                 // Reduce the gradients
-                constexpr int kMiniBatchSize = Policy::Hyper::kMiniBatchSize;
+                /*constexpr int kMiniBatchSize = Policy::Hyper::kMiniBatchSize;
                 if (kMiniBatchSize > 1)
                 {
                     for (int stride = 2; stride <= kMiniBatchSize; stride <<= 1)
@@ -170,7 +195,7 @@ namespace Flair
                         ReduceGradientsKernel << <kNumBlocks, kNumThreads >> > (kernelData, stride, miniBatchOffset);
                         IsOk(cudaGetLastError());
                     }
-                }
+                }*/
             }
 
             __host__ static void PrepareNewEpoch(TrainingKernelData<Policy> kernelData)
