@@ -21,7 +21,8 @@ namespace Flair
             if (kThreadIdx < kOutputWidth)
             {
                 ctx.scratch.At(kThreadIdx) = LossFunction::F(ctx.state[kThreadIdx], ctx.target[kThreadIdx]);
-                ctx.error[kThreadIdx] = LossFunction::dF(ctx.state[kThreadIdx], ctx.target[kThreadIdx]) / kOutputWidth;
+                ctx.error[kThreadIdx] = //((kThreadIdx == 5) ? 4.5f: 0.562f) * 
+                                        LossFunction::dF(ctx.state[kThreadIdx], ctx.target[kThreadIdx]) / kOutputWidth;
             }
 
             // Reduce

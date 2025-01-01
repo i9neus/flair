@@ -33,8 +33,10 @@ namespace Flair
         using OptimiserFunction = Adam<LearningRate, LRDecay>;
         //using OptimiserFunction = Optimiser::SGD<LearningRate, LRDecay>;
 
-        using Model = LinearSequential<Linear<49, 49>, Linear<49, 45>, Linear<45, 41>, Linear<41, 36>>;
-        //using Model = LinearSequential<Linear<49, 36>>;
+        //using Model = LinearSequential<Linear<49, 49>, Linear<49, 45>, Linear<45, 41>, Linear<41, 36>>;
+        //using Model = LinearSequential<Linear<35, 35>, Linear<35, 32>, Linear<32, 28>, Linear<28, 25>>;
+        //using Model = LinearSequential<Linear<25, 25>, Linear<25, 25>, Linear<25, 25>, Linear<25, 25>>;
+        using Model = LinearSequential<Linear<49, 49>, Linear<49, 36>, Linear<36, 25>, Linear<25, 9>>;
 
         using Evaluator = LinearSequentialEvaluator<kComputeDevice, Model>;
 
@@ -48,21 +50,6 @@ namespace Flair
 
         void MLP::Initialise()
         {
-        }
-
-        void MLP::PrintGradients(const Cuda::Vector<float>& computeGradData) const
-        {
-            std::vector<float> gradData;
-            gradData <<= computeGradData;
-            std::printf("%s\n", Model::Format(gradData).c_str());
-
-            // Print optimisers data
-            /*gradData <<= computeOptimiserData;
-            for (auto f : gradData)
-            {
-                std::printf("%.3f ", f);
-            }
-            std::printf("\n");*/
         }
 
         void MLP::Train(const std::vector<InputSample>& inputSamples, const std::vector<OutputSample>& targetSamples)

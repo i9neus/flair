@@ -33,16 +33,22 @@ namespace Flair
                 Image1f::ParallelMapFunctor dilateFunctor = [&](const int x, const int y, const int threadIdx, float* pixel)
                 {
                     float dilated = 0;
+                    float mean = 0;
+                    int numPixels = 0;
                     for (int v = -dilateRadius; v <= dilateRadius; ++v)
                     {
                         for (int u = -dilateRadius; u <= dilateRadius; ++u)
                         {
                             if (heuristicImage.Contains(x + u, y + v))
                             {
-                                dilated = std::max(dilated, heuristicImage.At(x + u, y + v)[0]);
+                                const auto f = heuristicImage.At(x + u, y + v)[0];
+                                dilated = std::max(dilated, f);
+                                mean += f;
+                                numPixels++;
                             }
                         }
-                        *pixel = dilated;
+                        *pixel = std::max(heuristicImage.At(x, y)[0], mean / numPixels);
+                        //*pixel = dilated;
                     }
                 };
 
@@ -56,14 +62,14 @@ namespace Flair
     };
     
     // Measures the variance of the image in a 3x3 window centered around the pixel at x,y
-    template<int KernelSize>
-    class VarianceHeuristic : public FeatureHeuristic<VarianceHeuristic<KernelSize>>
+    template<int KernelRadius>
+    class VarianceHeuristic : public FeatureHeuristic<VarianceHeuristic<KernelRadius>>
     {
     private:
         enum : int 
         { 
-            kKernelRadius = KernelSize / 2, 
-            kKernelArea = KernelSize * KernelSize
+            kKernelSize = KernelRadius * 2 + 1,
+            kKernelArea = kKernelSize * kKernelSize
         };
 
     public:
@@ -72,9 +78,9 @@ namespace Flair
         static float EvaluatePixel(const Image1f& inputImage, const int x, const int y)
         {
             float m = 0, m2 = 0;
-            for (int v = -kKernelRadius; v <= kKernelRadius; ++v)
+            for (int v = -KernelRadius; v <= KernelRadius; ++v)
             {
-                for (int u = -kKernelRadius; u <= kKernelRadius; ++u)
+                for (int u = -KernelRadius; u <= KernelRadius; ++u)
                 {
                     const float f = inputImage.Sample(x + u, y + v);
                     m += f;
@@ -82,7 +88,7 @@ namespace Flair
                 }
             }
             float var = m2 / kKernelArea - sqr(m / kKernelArea); // Variance
-            //var = std::pow(var, 0.6f); // Mix
+            var = std::pow(var, 0.6f); // Mix
             //var = std::sqrt(var); // Standard deviation
 
             return var;
@@ -90,11 +96,15 @@ namespace Flair
     };
 
     // 2D discrete cosine transform with quadratic time complexity 
-    template<int KernelSize>
-    class DCTFeatureHeuristic : public FeatureHeuristic<DCTFeatureHeuristic<KernelSize>>
+    template<int KernelRadius>
+    class DCTFeatureHeuristic : public FeatureHeuristic<DCTFeatureHeuristic<KernelRadius>>
     {
     private:
-        enum : int { kKernelRadius = KernelSize / 2, kKernelArea = KernelSize * KernelSize };
+        enum : int
+        {
+            kKernelSize = KernelRadius * 2 + 1,
+            kKernelArea = kKernelSize * kKernelSize
+        };
         using ValueTable = std::array<float, kKernelArea>;
 
     private:
@@ -102,13 +112,13 @@ namespace Flair
         {
             ValueTable values;
             float meanVal = 0;
-            for (int v = -kKernelRadius + 1, i = 0; v <= kKernelRadius; ++v)
+            for (int v = -KernelRadius + 1, i = 0; v <= KernelRadius; ++v)
             {
-                for (int u = -kKernelRadius + 1; u <= kKernelRadius; ++u, ++i)
+                for (int u = -KernelRadius + 1; u <= KernelRadius; ++u, ++i)
                 {
                     // The DCT requires a 4x4 grid however we only want 3x3. Clamp the pixel coordinates to the so that we don't accidentally 
                     // sample pixels belonging to features that fall outside of the input window of the NN model
-                    values[i] = inputImage.Sample(x + std::min(kKernelRadius - 1, u), y + std::min(kKernelRadius - 1, v));
+                    values[i] = inputImage.Sample(x + std::min(KernelRadius - 1, u), y + std::min(KernelRadius - 1, v));
                     //values[i] = inputImage.Sample(x + u, y + v);
                     meanVal += values[i];
                 }
@@ -126,18 +136,18 @@ namespace Flair
             // Dumb n^2 complexity DCT. Requires kKernelArea^2 iterations per pixel for a window size of . 
             // TODO: Optimise using Cooley-Tukey to get complexity down to linearithmic complexity.
             ValueTable coeffs;
-            for (int l = 0, i = 0; l < KernelSize; ++l)
+            for (int l = 0, i = 0; l < kKernelSize; ++l)
             {
-                for (int m = 0; m < KernelSize; ++m, ++i)
+                for (int m = 0; m < kKernelSize; ++m, ++i)
                 {
                     float sigma = 0., mean = 0.;
                     float norm = (1. + float(l)) * (1. + float(m));
-                    for (int v = -kKernelRadius, j = 0; v < kKernelRadius; ++v)
+                    for (int v = -KernelRadius, j = 0; v < KernelRadius; ++v)
                     {
-                        for (int u = -kKernelRadius; u < kKernelRadius; ++u, ++j)
+                        for (int u = -KernelRadius; u < KernelRadius; ++u, ++j)
                         {
-                            float coeff = cos(kTwoPi * float(l) * 0.5 * (float(u + kKernelRadius) + 0.5) / float(KernelSize)) *
-                                cos(kTwoPi * float(m) * 0.5 * (float(v + kKernelRadius) + 0.5) / float(KernelSize)) * norm;
+                            float coeff = std::cos(kTwoPi * float(l) * 0.5 * (float(u + KernelRadius) + 0.5) / float(kKernelSize)) *
+                                          std::cos(kTwoPi * float(m) * 0.5 * (float(v + KernelRadius) + 0.5) / float(kKernelSize)) * norm;
 
                             sigma += values[j] * coeff;
                         }
