@@ -441,10 +441,34 @@ namespace Flair
         ////////////////////////////////////////////////////////////////////////////////////////
 
         printf("Training MLP...\n");
-        NN::MLP mlp;
+
+        static constexpr ComputeDevice kComputeDevice = ComputeDevice::kCUDA;
+                                                    //ComputeDevice::kCPU;
+
+        using ActivationFunction = NN::Activation::LeakyReLU;
+        //using ActivationFunction = Activation::Sine;
+
+        using LossFunction = NN::Loss::L1;
+        //using LossFunction = Loss::L2;
+
+        using LRDecay = NN::NullDecaySchedule;
+        //using LRDecay = Optimiser::ExponentialDecaySchedule<std::ratio<99, 100>>;
+
+        using OptimiserFunction = NN::Adam<std::ratio<1, 1000>, LRDecay>;
+        //using OptimiserFunction = Optimiser::SGD<std::ratio<1, 1000>, LRDecay>;
+
+        //using Model = LinearSequential<Linear<49, 49>, Linear<49, 45>, Linear<45, 41>, Linear<41, 36>>;
+        //using Model = LinearSequential<Linear<35, 35>, Linear<35, 32>, Linear<32, 28>, Linear<28, 25>>;
+        //using Model = LinearSequential<Linear<25, 25>, Linear<25, 25>, Linear<25, 25>, Linear<25, 25>>;
+        using Model = NN::LinearSequential<NN::Linear<49, 49>, NN::Linear<49, 36>, NN::Linear<36, 25>, NN::Linear<25, 9>>;
+
+        using ModelInitialiser = NN::UniformXavierInitialiser;
+        //using ModelInitialiser = SirenInitialiser;
+
+        NN::MLP<Model, ModelInitialiser, ActivationFunction, LossFunction, OptimiserFunction> mlp;
         if (kTrainMLP)
         {
-            mlp.Train(inputSamples, targetSamples);
+            mlp.Train(inputSamples, targetSamples, 50);
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////        

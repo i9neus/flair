@@ -30,7 +30,6 @@ add_executable(mlplifter
     src/core/nn/Permute.cuh
     src/core/nn/MLP/LinearSequential.cuh
     src/core/nn/MLP/LinearSequentialCPU.cuh
-    src/core/nn/MLP/MLP.cu
     src/core/nn/MLP/MLP.cuh
     src/core/nn/MLP/Ctx.cuh
     src/core/nn/MLP/Training.cuh
