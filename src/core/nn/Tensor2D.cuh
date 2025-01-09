@@ -71,12 +71,7 @@ namespace Flair
         template<typename RNG>
         __host__ void Initialise(RNG& rng)
         {
-            const float norm = kRoot2 * std::sqrt(2.0f / (N + M));
-            //const float norm = std::sqrt(1.f / N);
-            for (int i = 0; i < M * N; ++i) 
-            { 
-                rawData[i] = rng() * norm;
-            }
+            for (int i = 0; i < M * N; ++i) { rawData[i] = rng(); }
             ZeroGrad();
         }
 

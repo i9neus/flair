@@ -20,6 +20,7 @@ add_executable(mlplifter
     src/core/utils/cuda/CudaObject.cuh
     src/core/utils/cuda/CudaVector.cuh
     src/core/utils/TemplateUtils.h
+    src/core/nn/ParameterInitialiser.cuh
     src/core/nn/TensorOps.cuh
     src/core/nn/Tensor2D.cuh
     src/core/nn/Tensor1D.cuh

@@ -63,6 +63,20 @@ namespace Flair
                     return ef / sqr(1. + ef);
                 }
             };
+
+            // Sinusoidal activation function
+            struct Sine
+            {
+                static __forceinline__ __host__ __device__ void F(float& f)
+                {
+                    f = sinf(f);
+                }
+
+                static __forceinline__ __host__ __device__ float dF(const float f)
+                {
+                    return cosf(f);
+                }
+            };
         }
     }
 }

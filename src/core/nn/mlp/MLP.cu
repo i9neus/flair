@@ -1,7 +1,6 @@
 #include "MLP.cuh"
 #include "core/utils/HighResTimer.h"
 #include "core/io/IOUtils.h"
-#include "../ContinuousRandomVariable.cuh"
 #include "../Permute.cuh"
 #include "Training.cuh"
 #include "TrainingCPU.cuh"
@@ -22,14 +21,15 @@ namespace Flair
                                                         //ComputeDevice::kCPU;
 
         using ActivationFunction = Activation::LeakyReLU; 
+        //using ActivationFunction = Activation::Sine;
 
         using LossFunction = Loss::L1;
-
-        using LearningRate = std::ratio<1, 1000>;
+        //using LossFunction = Loss::L2;
         
         using LRDecay = NullDecaySchedule;
         //using LRDecay = Optimiser::ExponentialDecaySchedule<std::ratio<99, 100>>;
 
+        using LearningRate = std::ratio<1, 1000>;
         using OptimiserFunction = Adam<LearningRate, LRDecay>;
         //using OptimiserFunction = Optimiser::SGD<LearningRate, LRDecay>;
 
@@ -37,6 +37,9 @@ namespace Flair
         //using Model = LinearSequential<Linear<35, 35>, Linear<35, 32>, Linear<32, 28>, Linear<28, 25>>;
         //using Model = LinearSequential<Linear<25, 25>, Linear<25, 25>, Linear<25, 25>, Linear<25, 25>>;
         using Model = LinearSequential<Linear<49, 49>, Linear<49, 36>, Linear<36, 25>, Linear<25, 9>>;
+
+        using ModelInitialiser = UniformXavierInitialiser;
+        //using ModelInitialiser = SirenInitialiser;
 
         using Evaluator = LinearSequentialEvaluator<kComputeDevice, Model>;
 
@@ -74,9 +77,7 @@ namespace Flair
 
             // Determininstically initialise the mini-batch weights and the optimiser 
             std::vector<float> hostModelData(Model::kNumParams);
-            //auto rng = NormalRandomDistribution(0, 1.f, std::hash<int>{}(0));
-            auto rng = UniformDistribution(-1, 1, std::hash<int>{}(0));
-            //auto rng = Ones();
+            auto rng = ModelInitialiser();
             Model::Initialise(hostModelData, rng);
             
             // Load external weights
