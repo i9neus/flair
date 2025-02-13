@@ -13,7 +13,7 @@ namespace Flair
 
         static void Classify(const Image1f& inputImage, const ImageRect& region, Image1f& heuristicImage, float& maxVal, const int dilateRadius)
         {
-            heuristicImage.Resize(inputImage);
+            heuristicImage.ResizeFrom(inputImage);
 
             const int numThreads = heuristicImage.GetThreadCount();
             std::vector<float> maxVarMap(numThreads, 0.0f);

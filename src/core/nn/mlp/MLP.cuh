@@ -25,13 +25,13 @@ namespace Flair
 {
     namespace NN
     {
-        template<typename Model, typename ModelInitialiser, typename ActivationFunction, typename LossFunction, typename OptimiserFunction, ComputeDevice TargetDevice = ComputeDevice::kCUDA>
+        template<typename Model, typename ModelInitialiser, typename ActivationFunction, typename LossFunction, typename OptimiserFunction, int MiniBatchSize = 128, ComputeDevice TargetDevice = ComputeDevice::kCUDA>
         class MLP
         {
         public:
             enum : int
             {
-                kMiniBatchSize = 128
+                kMiniBatchSize = MiniBatchSize
             };
 
             using InputSample = Tensor1D<Model::kInputWidth, false>;
@@ -60,18 +60,22 @@ namespace Flair
                 AssertFmt(ctxSize < prop.sharedMemPerBlock - kSharedMemorySafeMargin, "Model context exceeds capacity of shared memory.");
 
                 printf_red("TrainingCtx: %i bytes\n", ctxSize);
+                printf_red("Model size: %i parameters\n", Model::kNumParams);
 
-                Cuda::Vector<float> computeGradData(TargetDevice, Policy::Hyper::kMiniBatchSize * Policy::Model::kNumParams, 0.f);
+                Cuda::Vector<float> computeGradData(TargetDevice, kMiniBatchSize * Policy::Model::kNumParams, 0.f);
                 Cuda::Vector<InputSample> computeInputSamples(TargetDevice, inputSamples.size());
                 Cuda::Vector<OutputSample> computeOutputSamples(TargetDevice, inputSamples.size());
                 Cuda::Vector<OutputSample> computeTargetSamples(TargetDevice, inputSamples.size());
-                Cuda::Vector<float> computeSampleLosses(TargetDevice, Policy::Hyper::kMiniBatchSize);
+                Cuda::Vector<float> computeSampleLosses(TargetDevice, kMiniBatchSize);
                 Cuda::Object<float> computeMiniBatchLoss(TargetDevice);
 
                 // Determininstically initialise the mini-batch weights and the optimiser 
                 std::vector<float> hostModelData(Model::kNumParams);
                 auto rng = ModelInitialiser();
                 Model::Initialise(hostModelData, rng);
+
+                //hostModelData <<= m_computeModelData;
+                //printf_yellow("WEIGHTS:\n%s\n\n", Model::Format(hostModelData).c_str());
 
                 // Load external weights
                 /*Assert(IO::DeserialiseArray(hostModelData, "C:/projects/probenet/src/experiments/flair/weights.dat") > 0);
@@ -128,7 +132,7 @@ namespace Flair
                 for (int epochIdx = 0; epochIdx < numEpochs && miniBatchIdx < kMaxMiniBatches; ++epochIdx)
                 {
                     float meanLoss = 0;
-                    for (int sampleIdx = 0; sampleIdx < kernelData.batchSize && miniBatchIdx < kMaxMiniBatches; sampleIdx += Policy::Hyper::kMiniBatchSize, ++miniBatchIdx)
+                    for (int sampleIdx = 0; sampleIdx < kernelData.batchSize && miniBatchIdx < kMaxMiniBatches; sampleIdx += kMiniBatchSize, ++miniBatchIdx)
                     {
                         kernelTimer.Reset();
 
@@ -189,7 +193,7 @@ namespace Flair
                     }
 
                     // Record the loss
-                    meanLoss /= std::ceil(kernelData.batchSize / float(Policy::Hyper::kMiniBatchSize));
+                    meanLoss /= std::ceil(kernelData.batchSize / float(kMiniBatchSize));
                     epochLoss.emplace_back(miniBatchIdx, meanLoss);
 
                     if (epochIdx == 0 || epochIdx == numEpochs - 1 || lossTimer.Get() > 1. / 3)
@@ -225,9 +229,9 @@ namespace Flair
 
                 /*std::vector<float> gradData;
                 gradData <<= computeGradData;
-                std::printf("GRADIENTS: %s\n", Model::Format(gradData).c_str());
+                std::printf("GRADIENTS: %s\n", Model::Format(gradData).c_str());*/
 
-                hostModelData <<= m_computeModelData;
+                /*hostModelData <<= m_computeModelData;
                 printf_yellow("WEIGHTS:\n%s\n\n", Model::Format(hostModelData).c_str());*/
 
                 // Print optimiser data
@@ -243,8 +247,8 @@ namespace Flair
 
             void Infer(ReadBatchFunctor readBatch, WriteBatchFunctor writeBatch)
             {
-                Cuda::Vector<InputSample> computeInputSamples(TargetDevice, Policy::Hyper::kMiniBatchSize);
-                Cuda::Vector<OutputSample> computeOutputSamples(TargetDevice, Policy::Hyper::kMiniBatchSize);
+                Cuda::Vector<InputSample> computeInputSamples(TargetDevice, kMiniBatchSize);
+                Cuda::Vector<OutputSample> computeOutputSamples(TargetDevice, kMiniBatchSize);
 
                 // Initialise the kernel data structure
                 InferenceKernelData<Policy> kernelData;

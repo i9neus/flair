@@ -384,7 +384,7 @@ namespace Flair
         return samples;
     }
 
-    __host__ Image3f LiftingCodec::Encode(const Image3f& inputImage)
+    __host__ Image3f LiftingCodec::TrainUpscaler(const Image3f& inputImage)
     { 
         constexpr bool kTrainMLP = true;
         constexpr bool kShowPytorchRef = false;
@@ -442,28 +442,12 @@ namespace Flair
 
         printf("Training MLP...\n");
 
-        static constexpr ComputeDevice kComputeDevice = ComputeDevice::kCUDA;
-                                                    //ComputeDevice::kCPU;
-
         using ActivationFunction = NN::Activation::LeakyReLU;
-        //using ActivationFunction = Activation::Sine;
-
-        using LossFunction = NN::Loss::L1;
-        //using LossFunction = Loss::L2;
-
+        using LossFunction = NN::Loss::L2;
         using LRDecay = NN::NullDecaySchedule;
-        //using LRDecay = Optimiser::ExponentialDecaySchedule<std::ratio<99, 100>>;
-
         using OptimiserFunction = NN::Adam<std::ratio<1, 1000>, LRDecay>;
-        //using OptimiserFunction = Optimiser::SGD<std::ratio<1, 1000>, LRDecay>;
-
-        //using Model = LinearSequential<Linear<49, 49>, Linear<49, 45>, Linear<45, 41>, Linear<41, 36>>;
-        //using Model = LinearSequential<Linear<35, 35>, Linear<35, 32>, Linear<32, 28>, Linear<28, 25>>;
-        //using Model = LinearSequential<Linear<25, 25>, Linear<25, 25>, Linear<25, 25>, Linear<25, 25>>;
         using Model = NN::LinearSequential<NN::Linear<49, 49>, NN::Linear<49, 36>, NN::Linear<36, 25>, NN::Linear<25, 9>>;
-
         using ModelInitialiser = NN::UniformXavierInitialiser;
-        //using ModelInitialiser = SirenInitialiser;
 
         NN::MLP<Model, ModelInitialiser, ActivationFunction, LossFunction, OptimiserFunction> mlp;
         if (kTrainMLP)
@@ -574,7 +558,7 @@ namespace Flair
         ////////////////////////////////////////////////////////////////////////////////////////
 
         waveletImage.Erase();
-        waveletImage.Resize(chnlData);
+        waveletImage.ResizeFrom(chnlData);
 
         if (kSignedColourView)
         {
@@ -602,12 +586,135 @@ namespace Flair
         return waveletImage;
     }
 
+    template<int Harmonics>
+    Tensor1D<Harmonics * 4> PositionalEncode(const float u, const float v)
+    {
+        Tensor1D<Harmonics * 4> sample;
+        for (int i = 0; i < Harmonics; ++i)
+        {
+            sample[i * 4] = std::sin(kPi * u * float(i + 1));
+            sample[i * 4 + 1] = std::cos(kPi * u * float(i + 1));
+            sample[i * 4 + 2] = std::sin(kPi * v * float(i + 1));
+            sample[i * 4 + 3] = std::cos(kPi * v * float(i + 1));
+        }
+        return sample;
+    }
+
+    __host__ Image3f LiftingCodec::TrainSiren(const Image3f& inputImage)
+    {
+        Image3f outputImage;
+        outputImage.ResizeFrom(inputImage);
+
+//#define kSiren
+
+#if defined(kSiren)
+
+        using ActivationFunction = NN::Activation::Sine;
+        using LossFunction = NN::Loss::L2;
+        using OptimiserFunction = NN::Adam<std::ratio<1, 10000>>;
+        using Model = NN::LinearSequential<NN::Linear<2, 64>, NN::Linear<64, 64>, NN::Linear<64, 64>, NN::Linear<64, 1>>;
+        using ModelInitialiser = NN::SirenInitialiser;
+
+        printf("Training Siren...\n");
+
+#else
+
+        using ActivationFunction = NN::Activation::LeakyReLU;
+        using LossFunction = NN::Loss::L2;
+        using OptimiserFunction = NN::Adam<std::ratio<1, 1000>>;
+
+        constexpr int kNumHarmonics = 13;
+        constexpr int kW = 4 * kNumHarmonics;
+        using Model = NN::LinearSequential<NN::Linear<kW, kW>, NN::Linear<kW, kW>, NN::Linear<kW, kW>, NN::Linear<kW, 1>>;
+
+        using ModelInitialiser = NN::UniformXavierInitialiser;
+
+        printf("Training PE ReLU...\n");
+
+#endif
+
+        std::vector<Model::InputTensorType> inputSamples(inputImage.Area());
+        std::vector<Model::OutputTensorType> targetSamples(inputImage.Area());
+
+        for (int y = 0, i = 0; y < inputImage.Height(); ++y)
+        {
+            for (int x = 0; x < inputImage.Width(); ++x, ++i)
+            {
+
+#if defined(kSiren)
+                const float u = mix(-0.5f, 0.5f, float(x) / inputImage.Width());
+                const float v = mix(-0.5f, 0.5f, float(y) / inputImage.Width());
+                inputSamples[i] = Tensor1D({ u, v });
+#else
+                inputSamples[i] = PositionalEncode<kNumHarmonics>(float(x) / inputImage.Width(), float(y) / inputImage.Height());
+#endif
+
+                const float* pixel = inputImage.At(x, y);
+                //targetSamples[i] = Tensor1D({ pixel[0], pixel[1], pixel[2] });
+                targetSamples[i][0] = pixel[0];
+            }
+        }
+
+        NN::MLP<Model, ModelInitialiser, ActivationFunction, LossFunction, OptimiserFunction, 512> mlp;
+        mlp.Train(inputSamples, targetSamples, 10);
+
+        const int kSamplesPerBatch = 10000;
+        const int kNumPixels = inputImage.Area();
+        auto readSamples = [&](std::vector<Model::InputTensorType>& samples, const int batchIdx) -> bool
+        {
+            if (batchIdx >= kNumPixels) return false;
+
+            samples.reserve(kSamplesPerBatch);
+            samples.clear();            
+            for (int miniBatchIdx = 0, pixelIdx = batchIdx; miniBatchIdx < kSamplesPerBatch && pixelIdx < kNumPixels; ++miniBatchIdx, ++pixelIdx)
+            {
+
+#if defined(kSiren)
+                const float u = mix(-0.5f, 0.5f, float(pixelIdx % outputImage.Width()) / inputImage.Width());
+                const float v = mix(-0.5f, 0.5f, float(pixelIdx / outputImage.Width()) / inputImage.Height());                
+                samples.push_back(Tensor1D({ u, v }));
+#else
+                const float u = float(pixelIdx % outputImage.Width()) / inputImage.Width();
+                const float v = float(pixelIdx / outputImage.Width()) / inputImage.Height();
+                samples.push_back(PositionalEncode<kNumHarmonics>(u, v));
+#endif
+            }
+
+            return true;
+        };
+
+        auto writeSamples = [&](const std::vector<Model::OutputTensorType>& samples, int batchIdx) -> void
+        {
+            for (int sampleIdx = 0, pixelIdx = batchIdx; sampleIdx < samples.size(); ++sampleIdx, ++pixelIdx)
+            {
+                const int x = pixelIdx % outputImage.Width();
+                const int y = pixelIdx / outputImage.Width();
+
+                float* pixel = outputImage.At(x, y);
+                for (int c = 0; c < 3; ++c) { pixel[c] = samples[sampleIdx][0]; }            
+            }
+        };
+
+        // Infer the coefficients
+        printf("Reconstructing image...\n");
+        mlp.Infer(readSamples, writeSamples);
+
+        return outputImage;
+    }
+
+    __host__ Image3f LiftingCodec::Encode(const Image3f& inputImage)
+    {
+        //return TrainUpscaler(inputImage);
+
+        return TrainSiren(inputImage);
+    }
+
     __host__ Image3f LiftingCodec::Decode(const Image3f& inputImage)
     {
-        Image3f waveletImage = WaveletTransform(inputImage, -1, 1);
+        //Image3f waveletImage = WaveletTransform(inputImage, -1, 1);
 
         //waveletImage.ApplyGamma(2.2f);
 
-        return waveletImage;
+        return inputImage;
     }
 }

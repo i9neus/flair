@@ -46,8 +46,12 @@ namespace Flair
             virtual float operator()(const int layerIdx, const int N, const int M) override final
             {
                 constexpr float c = 6;
-                const float w = mix(-1.f, 1.f, m_rng(m_mt)) * std::sqrt(c / N);
-                return (layerIdx == 0) ? (30. * w) : w;
+                constexpr float omega0 = 30.f;
+
+                return mix(-1.f, 1.f, m_rng(m_mt)) * 
+                    ((layerIdx == 0) ? 
+                        (1. / N) : 
+                        (std::sqrt(c / N) / omega0));
             }
         };
     }

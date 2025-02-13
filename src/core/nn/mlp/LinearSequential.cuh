@@ -107,6 +107,9 @@ namespace Flair
                 kActivateLastLayer = 0
             };
 
+            using InputTensorType = Tensor1D<kInputWidth>;
+            using OutputTensorType = Tensor1D<kOutputWidth>;
+
         protected:
 
             template<int LayerIdx, typename Layer, typename... Next>
@@ -174,7 +177,7 @@ namespace Flair
             __inline__ __host__ static void Initialise(std::vector<float>& data, ParameterInitialiser& rng)
             {
                 AssertFmt(data.size() >= kNumParams, "Param data size %i does not match model size %i.", data.size(), kNumParams);
-                InitialiseRecursor<sizeof...(Layers), Layers..., Terminator>::F(data.data(), rng);
+                InitialiseRecursor<0, Layers..., Terminator>::F(data.data(), rng);
             }
 
             __inline__ __host__ static void Transpose(std::vector<float>& data)
@@ -219,9 +222,6 @@ namespace Flair
 
                     const Layer& layer = *reinterpret_cast<const Layer*>(data);
 
-                    //if (kThreadIdx < Layer::kN) ctx.error[kThreadIdx] = ctx.state[kThreadIdx];
-                    //if (kThreadIdx < ctx.scratch.Size()) ctx.scratch.At(kThreadIdx) = 0;
-
                     // Multiply the state by the layer weights
                     Mul(layer.w, ctx.state, ctx.state, ctx.scratch);
 
@@ -231,14 +231,14 @@ namespace Flair
                         // Add the bias
                         ctx.state[kThreadIdx] += layer.b[kThreadIdx];
 
+                        // Cache the feed-forward intermediate activations in this layer for use during backprop
+                        CacheActivations<LayerIdx>(ctx);
+                   
                         // Apply leaky ReLU activation, except on the last layer
                         if (kActivateLastLayer || LayerIdx != kDepth - 1)
                         {
-                            Ctx::Policy::Hyper::Activation::F(ctx.state[kThreadIdx]);
+                            ctx.state[kThreadIdx] = Ctx::Policy::Hyper::Activation::F(ctx.state[kThreadIdx]);
                         }
-
-                        // Cache the feed-forward intermediate activations in this layer for use during backprop
-                        CacheActivations<LayerIdx>(ctx);
                     }
 
                     //PrintActs<Layer, LayerIdx>(ctx);
@@ -290,7 +290,10 @@ namespace Flair
                             r < kM && k < kMPerThread;
                             ++k, ++r, ++i)
                         {
-                            layer.w[i] = ctx.error[r] * ((LayerIdx == 0) ? ctx.input[colIdx] : ctx.acts[LayerIdx - 1][colIdx]);
+                            layer.w[i] = ctx.error[r] * 
+                                ((LayerIdx == 0) ?
+                                    ctx.input[colIdx] :
+                                    Ctx::Policy::Hyper::Activation::F(ctx.acts[LayerIdx - 1][colIdx]));
                         }
                     }
 

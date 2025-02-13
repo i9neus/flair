@@ -82,7 +82,7 @@ namespace Flair
         }
 
         template<int OtherChannels>
-        inline void Resize(const Image<Type, OtherChannels>& other) { Resize(other.Width(), other.Height()); }
+        inline void ResizeFrom(const Image<Type, OtherChannels>& other) { Resize(other.Width(), other.Height()); }
 
         Image<Type, 1> ExtractChannel(const int chnlIdx) const
         {

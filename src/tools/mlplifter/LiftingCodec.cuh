@@ -26,6 +26,10 @@ namespace Flair
 		__host__ Image3f Decode(const Image3f& inputImage);
 
 	private:
+		__host__ Image3f TrainUpscaler(const Image3f& inputImage);
+		__host__ Image3f TrainSiren(const Image3f& inputImage);
+
+
 		__host__ void PrepareEncoder(const Image1f& waveletImage);
 		__host__ void GenerateTrainingSet(const int seed, InputSampleList& inputSamples, std::vector<float>& inputMeans, OutputSampleList& targetSamples);
 		__host__ std::tuple<LiftingCodec::InputSample, float, float, float> GenerateInputSample(const float x, const float y, UniformDistribution* uniform) const;
